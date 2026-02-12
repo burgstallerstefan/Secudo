@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  @apply box-border;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-50 transition-colors;
+}
+
+a {
+  @apply text-primary hover:underline;
+}
+
+/* Loading Spinner */
+.spinner {
+  @apply animate-spin;
+}

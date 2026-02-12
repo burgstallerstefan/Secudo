@@ -40,7 +40,7 @@ Ziele:
 - PDF-Export: Playwright (HTML → PDF)
 
 ### 1.6 Deployment
-- Docker-Container
+- **Docker-Container**
 - Cloud oder On-Prem
 
 ---

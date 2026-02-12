@@ -1,0 +1,57 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: tusedo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-tusedo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tusedo-dev-password}
+      POSTGRES_DB: ${DB_NAME:-tusedo_dev}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-tusedo} -d ${DB_NAME:-tusedo_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tusedo-network
+
+  # Next.js Application (Development)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tusedo-app
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${DB_USER:-tusedo}:${DB_PASSWORD:-tusedo-dev-password}@postgres:5432/${DB_NAME:-tusedo_dev}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-key-change-in-production}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXT_TELEMETRY_DISABLED: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - tusedo-network
+    command: sh -c "npx prisma generate && npx prisma db push --accept-data-loss && npm run dev"
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  tusedo-network:
+    driver: bridge

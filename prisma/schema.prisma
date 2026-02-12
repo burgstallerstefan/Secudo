@@ -1,0 +1,363 @@
+// Prisma schema configuration
+// Generated: 2026-02-11
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTH & USERS
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?
+  avatar    String?
+  jobTitle  String?
+  company   String?
+  companyLevel String? // SME, Enterprise, Consultant, Student
+
+  // Relations
+  projects       ProjectMembership[]
+  createdNodes   ModelNode[]         @relation("CreatedNodes")
+  updatedNodes   ModelNode[]         @relation("UpdatedNodes")
+  createdEdges   ModelEdge[]         @relation("CreatedEdges")
+  createdAnswers Answer[]
+  createdMeasures Measure[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+// ============================================
+// PROJECTS & MEMBERS
+// ============================================
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  norm        String   @default("IEC 62443") // Assessment standard
+  minRoleToView String  @default("any") // any, viewer, editor, admin, private
+
+  // Relations
+  members       ProjectMembership[]
+  nodes         ModelNode[]
+  edges         ModelEdge[]
+  dataObjects   DataObject[]
+  answers       Answer[]
+  measures      Measure[]
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+}
+
+model ProjectMembership {
+  id          String  @id @default(cuid())
+  projectId   String
+  userId      String
+  role        String  @default("Viewer") // Admin, Editor, Viewer
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  addedAt   DateTime @updatedAt
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+// ============================================
+// CANONICAL MODEL (GRAPH)
+// ============================================
+
+model ModelNode {
+  id              String   @id @default(cuid())
+  projectId       String
+  stableId        String   // Human-readable ID
+  name            String
+  category        String   // Component, Human, System
+  subtype         String?  // Software, Hardware, Mixed, Operator, etc.
+  description     String?
+  notes           String?
+  
+  // Hierarchy
+  parentNodeId    String?
+  parentNode      ModelNode?          @relation("ParentOf", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  childNodes      ModelNode[]          @relation("ParentOf")
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy       User?                @relation("CreatedNodes", fields: [createdByUserId], references: [id])
+  updatedBy       User?                @relation("UpdatedNodes", fields: [updatedByUserId], references: [id])
+  dataComponents  ComponentData[]
+  outgoingEdges   ModelEdge[]          @relation("SourceNode")
+  incomingEdges   ModelEdge[]          @relation("TargetNode")
+
+  // Metadata
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, stableId])
+  @@index([projectId])
+  @@index([parentNodeId])
+}
+
+model ModelEdge {
+  id              String   @id @default(cuid())
+  projectId       String
+  sourceNodeId    String
+  targetNodeId    String
+  name            String?
+  direction       String   @default("A_TO_B") // A_TO_B, B_TO_A, BIDIRECTIONAL
+  protocol        String?  // REST, MQTT, HTTP, etc.
+  description     String?
+  notes           String?
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceNode      ModelNode            @relation("SourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode      ModelNode            @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  createdBy       User?                @relation("CreatedEdges", fields: [createdByUserId], references: [id])
+  dataFlows       EdgeDataFlow[]
+
+  // Metadata
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, sourceNodeId, targetNodeId])
+  @@index([projectId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+}
+
+// ============================================
+// DATA OBJECTS (Information Assets)
+// ============================================
+
+model DataObject {
+  id              String   @id @default(cuid())
+  projectId       String
+  name            String
+  description     String?
+  dataClass       String   // Credentials, PersonalData, SafetyRelevant, ProductionData, etc.
+  confidentiality Int      @default(5) // 1-10
+  integrity       Int      @default(5) // 1-10
+  availability    Int      @default(5) // 1-10
+  tags            String?  // JSON array of tags
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  componentData   ComponentData[]
+  edgeDataFlows   EdgeDataFlow[]
+
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, name])
+  @@index([projectId])
+}
+
+model ComponentData {
+  id              String   @id @default(cuid())
+  nodeId          String
+  dataObjectId    String
+  role            String   // Stores, Processes, Generates, Receives
+  notes           String?
+
+  // Relations
+  node            ModelNode            @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  dataObject      DataObject           @relation(fields: [dataObjectId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, dataObjectId])
+  @@index([nodeId])
+  @@index([dataObjectId])
+}
+
+model EdgeDataFlow {
+  id              String   @id @default(cuid())
+  edgeId          String
+  dataObjectId    String
+  direction       String   @default("SourceToTarget") // SourceToTarget, TargetToSource, Bidirectional
+  notes           String?
+
+  // Relations
+  edge            ModelEdge            @relation(fields: [edgeId], references: [id], onDelete: Cascade)
+  dataObject      DataObject           @relation(fields: [dataObjectId], references: [id], onDelete: Cascade)
+
+  @@unique([edgeId, dataObjectId])
+  @@index([edgeId])
+  @@index([dataObjectId])
+}
+
+// ============================================
+// ASSESSMENT
+// ============================================
+
+model AssetValue {
+  id              String   @id @default(cuid())
+  projectId       String
+  assetType       String   // Node, Edge
+  assetId         String   // nodeId or edgeId
+  value           Int      // 1-10
+  comment         String?
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, assetType, assetId])
+  @@index([projectId])
+}
+
+model Question {
+  id              String   @id @default(cuid())
+  projectId       String
+  text            String
+  normReference   String   // IEC 62443-3-3, etc.
+  targetType      String   // Component, Edge, DataObject, None
+  answerType      String   @default("YesNo") // YesNo, Text, MultiSelect
+  riskDescription String?
+  defaultMeasures String?  // JSON array of measure templates
+
+  // Relations
+  answers         Answer[]
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+model Answer {
+  id              String   @id @default(cuid())
+  projectId       String
+  questionId      String
+  userId          String
+  answerValue     String?  // Yes, No, N/A, or text
+  targetType      String?  // Component, Edge, DataObject, None
+  targetId        String?  // nodeId, edgeId, or dataObjectId
+  comment         String?
+  isAggregate     Boolean  @default(false)
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  question        Question             @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user            User                 @relation(fields: [userId], references: [id])
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([questionId])
+  @@index([userId])
+}
+
+model FinalAnswer {
+  id              String   @id @default(cuid())
+  projectId       String
+  questionId      String
+  answerValue     String   // Final, aggregated answer
+  status          String   @default("Approved") // Approved, Pending, Conflict
+  resolvedAt      DateTime?
+  notes           String?
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectId, questionId])
+  @@index([projectId])
+}
+
+// ============================================
+// FINDINGS & MEASURES
+// ============================================
+
+model Finding {
+  id              String   @id @default(cuid())
+  projectId       String
+  assetType       String   // Node, Edge
+  assetId         String
+  assetName       String
+  questionText    String
+  normReference   String
+  severity        Int      // 1-10
+  description     String?
+
+  // Relations
+  measures        Measure[]
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([assetId])
+}
+
+model Measure {
+  id              String   @id @default(cuid())
+  projectId       String
+  findingId       String
+  title           String
+  description     String?
+  assetType       String   // Node, Edge
+  assetId         String
+  normReference   String?
+  priority        String   @default("Medium") // Low, Medium, High, Critical
+  status          String   @default("Open") // Open, InProgress, Done
+  assignedTo      String?
+  dueDate         DateTime?
+
+  // Relations
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  finding         Finding              @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  createdBy       User?                @relation(fields: [createdByUserId], references: [id])
+
+  // Metadata
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([findingId])
+}
+
+// ============================================
+// REPORTS
+// ============================================
+
+model Report {
+  id              String   @id @default(cuid())
+  projectId       String
+  title           String
+  generatedAt     DateTime @default(now())
+  pdfUrl          String?
+  format          String   @default("PDF") // PDF, HTML, JSON
+
+  @@index([projectId])
+}
