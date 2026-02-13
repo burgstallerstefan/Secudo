@@ -5,6 +5,7 @@ import type { FormEvent } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -40,11 +41,14 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* TESTUDO Logo */}
+        {/* SECUDO Logo */}
         <div className="text-center mb-8">
-          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-400 drop-shadow-lg animate-pulse mb-2">
-            TESTUDO
-          </h1>
+          <div className="mb-3 flex items-center justify-center gap-3">
+            <Image src="/secudo-logo.png?v=20260212c" alt="Secudo logo" width={144} height={144} className="secudo-brand-logo h-36 w-36 object-contain" priority />
+            <h1 className="secudo-brand-wordmark text-5xl font-black">
+              SECUDO
+            </h1>
+          </div>
           <p className="text-slate-400 text-sm">Security Assessment Tool</p>
         </div>
 
@@ -109,3 +113,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

@@ -6,7 +6,6 @@ interface HierarchyNode {
   id: string;
   name: string;
   category: string;
-  subtype: string | null;
   parentNodeId: string | null;
   children: HierarchyNode[];
 }
@@ -57,7 +56,6 @@ export async function GET(
         id: true,
         name: true,
         category: true,
-        subtype: true,
         parentNodeId: true,
       },
       orderBy: { createdAt: 'asc' },

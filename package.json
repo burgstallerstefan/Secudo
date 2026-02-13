@@ -1,7 +1,7 @@
 {
-  "name": "tusedo",
+  "name": "secudo",
   "version": "0.1.0",
-  "description": "Testudo - Product Security Assessment Tool",
+  "description": "Secudo - Product Security Assessment Tool",
   "private": true,
   "scripts": {
     "dev": "next dev",

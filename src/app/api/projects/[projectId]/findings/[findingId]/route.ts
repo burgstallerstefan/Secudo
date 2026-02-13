@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { isGlobalAdmin } from '@/lib/user-role';
 
 const UpdateFindingSchema = z.object({
   assetType: z.enum(['Node', 'Edge']).optional(),
@@ -32,7 +33,7 @@ export async function GET(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership) {
+    if (!isGlobalAdmin(session.user?.role) && !membership) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -68,7 +69,7 @@ export async function PUT(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 
@@ -117,7 +118,7 @@ export async function DELETE(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 

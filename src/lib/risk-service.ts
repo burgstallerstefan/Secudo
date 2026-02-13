@@ -4,6 +4,11 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import {
+  FindingRecommendation,
+  FindingRecommendationInput,
+  generateFindingRecommendations,
+} from '@/lib/llm-service';
 
 export interface RiskCalculationInput {
   assetValue: number; // 1-10 criticality
@@ -14,6 +19,43 @@ export interface RiskScore {
   score: number; // 1-100
   level: 'Low' | 'Medium' | 'High' | 'Critical';
 }
+
+const FINDING_FULFILLMENT_THRESHOLD = 4;
+
+const parseAssessmentFulfillmentScore = (answerValue: string | null | undefined): number | null => {
+  if (!answerValue) {
+    return null;
+  }
+
+  const normalized = answerValue.trim().toUpperCase();
+  if (normalized === 'N/A') {
+    return null;
+  }
+  if (normalized === 'YES') {
+    return 10;
+  }
+  if (normalized === 'NO') {
+    return 0;
+  }
+  if (!/^(10|[0-9])$/.test(normalized)) {
+    return null;
+  }
+
+  return Number.parseInt(normalized, 10);
+};
+
+const shouldGenerateFindingForAnswer = (answerValue: string | null | undefined): boolean => {
+  const score = parseAssessmentFulfillmentScore(answerValue);
+  return score !== null && score <= FINDING_FULFILLMENT_THRESHOLD;
+};
+
+const fallbackSeverityFromFulfillment = (answerValue: string | null | undefined): number => {
+  const score = parseAssessmentFulfillmentScore(answerValue);
+  if (score === null) {
+    return 7;
+  }
+  return Math.max(1, Math.min(10, 10 - score));
+};
 
 /**
  * Calculate risk score using formula: assetValue × findingSeverity × 1.25
@@ -46,6 +88,11 @@ export function calculateRiskScore(input: RiskCalculationInput): RiskScore {
  */
 export async function autoGenerateFindings(projectId: string, userId: string) {
   try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { norm: true },
+    });
+
     const finalAnswers = await prisma.finalAnswer.findMany({
       where: { projectId },
     });
@@ -61,12 +108,12 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
             answerValue: answer.answerValue,
             targetType: 'Node' as 'Node' | 'Edge',
             targetId: 'general',
+            comment: null as string | null,
           }))
         : (
             await prisma.answer.findMany({
               where: {
                 projectId,
-                answerValue: { in: ['No', 'NO', 'no'] },
               },
             })
           ).map((answer) => ({
@@ -74,13 +121,13 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
             answerValue: answer.answerValue || '',
             targetType: answer.targetType === 'Edge' ? ('Edge' as const) : ('Node' as const),
             targetId: answer.targetId || 'general',
+            comment: answer.comment || null,
           }));
 
-    const generatedFindings = [];
-    const generatedMeasures = [];
-
+    const recommendationInputs: FindingRecommendationInput[] = [];
+    const recommendationInputKeys = new Set<string>();
     for (const answer of answersToEvaluate) {
-      if (answer.answerValue.toLowerCase() !== 'no') {
+      if (!shouldGenerateFindingForAnswer(answer.answerValue)) {
         continue;
       }
 
@@ -89,9 +136,51 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
         continue;
       }
 
-      const severity = 7;
       const normalizedAssetType = answer.targetType === 'Edge' ? 'Edge' : 'Node';
       const normalizedAssetId = answer.targetId || 'general';
+      const recommendationKey = `${answer.questionId}::${normalizedAssetType}::${normalizedAssetId}`;
+      if (recommendationInputKeys.has(recommendationKey)) {
+        continue;
+      }
+      recommendationInputKeys.add(recommendationKey);
+
+      recommendationInputs.push({
+        key: recommendationKey,
+        questionText: question.text,
+        normReference: question.normReference,
+        assetType: normalizedAssetType,
+        assetName: normalizedAssetId === 'general' ? question.targetType || 'System' : normalizedAssetId,
+        answerComment: answer.comment,
+      });
+    }
+
+    const aiRecommendationResult = await generateFindingRecommendations(
+      recommendationInputs,
+      project?.norm || undefined
+    );
+    const recommendationByKey = new Map<string, FindingRecommendation>(
+      aiRecommendationResult.suggestions.map((suggestion) => [suggestion.key, suggestion])
+    );
+
+    const generatedFindings = [];
+    const generatedMeasures = [];
+
+    for (const answer of answersToEvaluate) {
+      if (!shouldGenerateFindingForAnswer(answer.answerValue)) {
+        continue;
+      }
+
+      const question = questions.find((item) => item.id === answer.questionId);
+      if (!question) {
+        continue;
+      }
+
+      const normalizedAssetType = answer.targetType === 'Edge' ? 'Edge' : 'Node';
+      const normalizedAssetId = answer.targetId || 'general';
+      const recommendationKey = `${answer.questionId}::${normalizedAssetType}::${normalizedAssetId}`;
+      const aiRecommendation = recommendationByKey.get(recommendationKey);
+      const severity = aiRecommendation?.severity ?? fallbackSeverityFromFulfillment(answer.answerValue);
+
       const existingFinding = await prisma.finding.findFirst({
         where: {
           projectId,
@@ -113,7 +202,7 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
           questionText: question.text,
           normReference: question.normReference,
           severity,
-          description: `Non-compliance with ${question.normReference}: ${question.text}`,
+          description: aiRecommendation?.findingDescription || `Non-compliance with ${question.normReference}: ${question.text}`,
         },
       });
 
@@ -123,12 +212,16 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
         data: {
           projectId,
           findingId: finding.id,
-          title: `Remediate: ${question.text}`,
-          description: `Implement control to address finding related to ${question.normReference}`,
+          title: aiRecommendation?.measureTitle || `Remediate: ${question.text}`,
+          description:
+            aiRecommendation?.measureDescription ||
+            `Implement control to address finding related to ${question.normReference}`,
           assetType: finding.assetType,
           assetId: finding.assetId,
           normReference: question.normReference,
-          priority: severity >= 8 ? 'Critical' : severity >= 6 ? 'High' : 'Medium',
+          priority:
+            aiRecommendation?.priority ||
+            (severity >= 8 ? 'Critical' : severity >= 6 ? 'High' : severity >= 4 ? 'Medium' : 'Low'),
           status: 'Open',
           createdByUserId: userId,
         },
@@ -140,6 +233,12 @@ export async function autoGenerateFindings(projectId: string, userId: string) {
     return {
       findingsGenerated: generatedFindings.length,
       measuresGenerated: generatedMeasures.length,
+      ai: {
+        provider: aiRecommendationResult.provider,
+        model: aiRecommendationResult.model,
+        fallbackUsed: aiRecommendationResult.fallbackUsed,
+        warning: aiRecommendationResult.warning,
+      },
     };
   } catch (error) {
     console.error('Auto-generate findings failed:', error);

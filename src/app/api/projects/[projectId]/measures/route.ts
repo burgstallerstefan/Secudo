@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
@@ -11,7 +13,9 @@ const CreateMeasureSchema = z.object({
   assetId: z.string(),
   normReference: z.string().optional(),
   priority: z.enum(['Low', 'Medium', 'High', 'Critical']).default('Medium'),
-  dueDate: z.string().optional(),
+  status: z.enum(['Open', 'InProgress', 'Done']).default('Open'),
+  assignedTo: z.string().optional(),
+  dueDate: z.string().optional().nullable(),
 });
 
 export async function GET(
@@ -29,12 +33,15 @@ export async function GET(
       );
     }
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId: params.projectId, userId } },
-    });
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
-    if (!membership) {
+    if (!access.canView) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
@@ -43,6 +50,18 @@ export async function GET(
 
     const measures = await prisma.measure.findMany({
       where: { projectId: params.projectId },
+      include: {
+        finding: {
+          select: {
+            id: true,
+            assetName: true,
+            normReference: true,
+            severity: true,
+            questionText: true,
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
     });
 
     return NextResponse.json(measures);
@@ -81,7 +100,7 @@ export async function POST(
       where: { projectId_userId: { projectId: params.projectId, userId } },
     });
 
-    if (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }
@@ -89,7 +108,8 @@ export async function POST(
     }
 
     const body = await req.json();
-    const { findingId, title, description, assetType, assetId, normReference, priority, dueDate } = CreateMeasureSchema.parse(body);
+    const { findingId, title, description, assetType, assetId, normReference, priority, status, assignedTo, dueDate } =
+      CreateMeasureSchema.parse(body);
 
     const finding = await prisma.finding.findUnique({
       where: { id: findingId },
@@ -108,6 +128,18 @@ export async function POST(
       );
     }
 
+    let dueDateValue: Date | undefined;
+    if (dueDate) {
+      const parsedDueDate = new Date(dueDate);
+      if (Number.isNaN(parsedDueDate.getTime())) {
+        return NextResponse.json(
+          { error: 'Invalid dueDate' },
+          { status: 400 }
+        );
+      }
+      dueDateValue = parsedDueDate;
+    }
+
     const measure = await prisma.measure.create({
       data: {
         projectId: params.projectId,
@@ -118,8 +150,21 @@ export async function POST(
         assetId,
         normReference,
         priority,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
+        status,
+        assignedTo: assignedTo?.trim() || undefined,
+        dueDate: dueDateValue,
         createdByUserId: userId,
+      },
+      include: {
+        finding: {
+          select: {
+            id: true,
+            assetName: true,
+            normReference: true,
+            severity: true,
+            questionText: true,
+          },
+        },
       },
     });
 

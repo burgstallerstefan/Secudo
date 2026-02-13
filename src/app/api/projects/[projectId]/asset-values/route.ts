@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
@@ -25,23 +27,54 @@ export async function GET(
       );
     }
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId: params.projectId, userId } },
-    });
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
-    if (!membership) {
+    if (!access.canView) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
       );
     }
 
-    const assetValues = await prisma.assetValue.findMany({
-      where: { projectId: params.projectId },
-    });
+    const [assetValues, dataObjects] = await Promise.all([
+      prisma.assetValue.findMany({
+        where: {
+          projectId: params.projectId,
+          assetType: {
+            in: ['Node', 'Edge'],
+          },
+        },
+      }),
+      prisma.dataObject.findMany({
+        where: { projectId: params.projectId },
+        select: {
+          id: true,
+          confidentiality: true,
+          integrity: true,
+          availability: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
 
-    return NextResponse.json(assetValues);
+    const derivedDataObjectValues = dataObjects.map((dataObject) => ({
+      id: `derived_${dataObject.id}`,
+      projectId: params.projectId,
+      assetType: 'DataObject' as const,
+      assetId: dataObject.id,
+      value: Math.max(dataObject.confidentiality, dataObject.integrity, dataObject.availability),
+      comment: undefined as string | undefined,
+      createdAt: dataObject.updatedAt,
+      updatedAt: dataObject.updatedAt,
+    }));
+
+    return NextResponse.json([...assetValues, ...derivedDataObjectValues]);
   } catch (error) {
     if ((error as Error).message === 'Unauthenticated') {
       return NextResponse.json(
@@ -77,7 +110,7 @@ export async function POST(
       where: { projectId_userId: { projectId: params.projectId, userId } },
     });
 
-    if (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }

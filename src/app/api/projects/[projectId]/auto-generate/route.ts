@@ -7,6 +7,7 @@ import { requireAuth } from '@/lib/auth';
 import { autoGenerateFindings } from '@/lib/risk-service';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { isGlobalAdmin } from '@/lib/user-role';
 
 export async function POST(
   _request: NextRequest,
@@ -28,7 +29,7 @@ export async function POST(
       where: { projectId_userId: { projectId: params.projectId, userId } },
     });
 
-    if (!membership || (membership.role !== 'Admin' && membership.role !== 'Editor')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Admin' && membership.role !== 'Editor'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }
@@ -42,6 +43,7 @@ export async function POST(
       success: true,
       findingsGenerated: result.findingsGenerated,
       measuresGenerated: result.measuresGenerated,
+      ai: result.ai,
     });
   } catch (error) {
     if ((error as Error).message === 'Unauthenticated') {

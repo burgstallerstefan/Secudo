@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
 
 const CreateDataObjectSchema = z.object({
   name: z.string().min(1),
@@ -40,8 +41,12 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await getMembership(params.projectId, userId);
-    if (!membership) {
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    if (!access.canView) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 

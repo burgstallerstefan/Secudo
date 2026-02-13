@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateModelFromText } from '@/lib/llm-service';
 import { getSession } from '@/lib/auth';
 import prisma from '@/lib/prisma';
+import { isGlobalAdmin } from '@/lib/user-role';
 
 /**
  * POST /api/projects/[projectId]/ai/model-from-text
@@ -43,7 +44,7 @@ export async function POST(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    if (!project.members.length || !['Admin', 'Editor'].includes(project.members[0].role)) {
+    if (!isGlobalAdmin(session.user.role) && (!project.members.length || !['Admin', 'Editor'].includes(project.members[0].role))) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
@@ -73,7 +74,7 @@ export async function POST(
   } catch (error) {
     console.error('Model generation error:', error);
     return NextResponse.json(
-      { success: false, nodes: [], edges: [], error: 'Internal server error' },
+      { success: false, nodes: [], edges: [], dataObjects: [], componentData: [], edgeDataFlows: [], error: 'Internal server error' },
       { status: 500 }
     );
   }

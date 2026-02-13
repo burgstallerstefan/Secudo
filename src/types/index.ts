@@ -41,8 +41,7 @@ export interface ProjectDTO {
 export interface ModelNodeDTO {
   id: string;
   name: string;
-  category: 'Component' | 'Human' | 'System';
-  subtype: string | null;
+  category: 'Container' | 'Component' | string;
   parentNodeId: string | null;
   stableId: string;
   createdAt: Date;
@@ -52,6 +51,8 @@ export interface ModelEdgeDTO {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandleId: string | null;
+  targetHandleId: string | null;
   name: string | null;
   direction: 'A_TO_B' | 'B_TO_A' | 'BIDIRECTIONAL';
   protocol: string | null;

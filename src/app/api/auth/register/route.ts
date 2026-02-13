@@ -1,21 +1,25 @@
 import { prisma } from '@/lib/prisma';
 import { hashPassword } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
+import { ensureInitialAdminUser } from '@/lib/initial-admin';
 import * as z from 'zod';
 
 // Validation schema
 const RegisterSchema = z.object({
-  name: z.string().min(2),
+  firstName: z.string().min(2),
+  lastName: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(8),
   jobTitle: z.string().optional(),
-  companyLevel: z.enum(['SME', 'Enterprise', 'Consultant', 'Student']).optional(),
+  role: z.enum(['Viewer', 'Editor', 'Admin']).optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureInitialAdminUser();
+
     const body = await req.json();
-    const { name, email, password, jobTitle, companyLevel } = RegisterSchema.parse(body);
+    const { firstName, lastName, email, password, jobTitle } = RegisterSchema.parse(body);
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -35,11 +39,13 @@ export async function POST(req: NextRequest) {
     // Create user
     const user = await prisma.user.create({
       data: {
-        name,
+        firstName,
+        lastName,
+        name: `${firstName} ${lastName}`.trim(),
         email,
         password: hashedPassword,
         jobTitle,
-        companyLevel,
+        role: 'Viewer',
       },
     });
 
@@ -48,6 +54,7 @@ export async function POST(req: NextRequest) {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
       },
       { status: 201 }
     );

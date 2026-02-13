@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
@@ -65,12 +67,15 @@ export async function GET(
       );
     }
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId: params.projectId, userId } },
-    });
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
-    if (!membership) {
+    if (!access.canView) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
@@ -80,22 +85,58 @@ export async function GET(
     let questions = await prisma.question.findMany({
       where: { projectId: params.projectId },
       include: {
-        answers: true,
+        answers: {
+          include: {
+            user: {
+              select: {
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
       },
     });
 
-    if (questions.length === 0) {
+    const project = await prisma.project.findUnique({
+      where: { id: params.projectId },
+      select: { norm: true },
+    });
+
+    if (!project) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
+
+    if (questions.length === 0 && project.norm !== 'None') {
       await prisma.question.createMany({
         data: DEFAULT_QUESTIONS.map((question) => ({
           projectId: params.projectId,
-          ...question,
+          text: question.text,
+          normReference:
+            project.norm === 'IEC 62443'
+              ? question.normReference
+              : project.norm,
+          targetType: question.targetType,
+          answerType: question.answerType,
         })),
       });
 
       questions = await prisma.question.findMany({
         where: { projectId: params.projectId },
         include: {
-          answers: true,
+          answers: {
+            include: {
+              user: {
+                select: {
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+          },
         },
       });
     }
@@ -134,9 +175,16 @@ export async function POST(
     // Check authorization
     const membership = await prisma.projectMembership.findUnique({
       where: { projectId_userId: { projectId: params.projectId, userId } },
+      include: {
+        project: {
+          select: {
+            norm: true,
+          },
+        },
+      },
     });
 
-    if (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }
@@ -150,13 +198,22 @@ export async function POST(
       data: {
         projectId: params.projectId,
         text,
-        normReference: normReference || 'IEC 62443',
+        normReference: normReference || (membership.project.norm !== 'None' ? membership.project.norm : 'Custom'),
         targetType,
         answerType,
         riskDescription,
       },
       include: {
-        answers: true,
+        answers: {
+          include: {
+            user: {
+              select: {
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
       },
     });
 

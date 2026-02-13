@@ -15,10 +15,115 @@ body {
 }
 
 a {
-  @apply text-primary hover:underline;
+  @apply text-primary no-underline;
 }
 
 /* Loading Spinner */
 .spinner {
   @apply animate-spin;
+}
+
+@keyframes aiButtonStreak {
+  0% {
+    transform: translateX(-180%);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.9;
+  }
+  62% {
+    opacity: 0.68;
+  }
+  100% {
+    transform: translateX(180%);
+    opacity: 0;
+  }
+}
+
+.ai-use-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -90%;
+  width: 62%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.2) 26%,
+    rgba(255, 255, 255, 0.96) 50%,
+    rgba(255, 255, 255, 0.28) 72%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(0.6px);
+  animation: aiButtonStreak 2s linear infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-use-button::before {
+    animation: none;
+  }
+}
+
+@keyframes secudoBrandShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes secudoBrandPulse {
+  0% {
+    filter: drop-shadow(0 0 0.05rem rgba(250, 204, 21, 0.15));
+  }
+  50% {
+    filter: drop-shadow(0 0 0.45rem rgba(251, 146, 60, 0.34));
+  }
+  100% {
+    filter: drop-shadow(0 0 0.05rem rgba(250, 204, 21, 0.15));
+  }
+}
+
+@keyframes secudoLogoPulse {
+  0% {
+    transform: translateY(0);
+    filter: drop-shadow(0 0 0.15rem rgba(251, 146, 60, 0.22));
+  }
+  50% {
+    transform: translateY(-1px);
+    filter: drop-shadow(0 0 0.7rem rgba(250, 204, 21, 0.3));
+  }
+  100% {
+    transform: translateY(0);
+    filter: drop-shadow(0 0 0.15rem rgba(251, 146, 60, 0.22));
+  }
+}
+
+.secudo-brand-wordmark {
+  background-image: linear-gradient(90deg, #fb923c, #facc15, #fdba74, #facc15, #fb923c);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: secudoBrandShift 4.2s ease-in-out infinite, secudoBrandPulse 2.8s ease-in-out infinite;
+}
+
+.secudo-brand-logo {
+  will-change: transform, filter;
+  animation: secudoLogoPulse 3.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .secudo-brand-wordmark,
+  .secudo-brand-logo {
+    animation: none;
+  }
 }

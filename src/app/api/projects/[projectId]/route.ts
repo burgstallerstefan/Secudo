@@ -1,5 +1,13 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { canUserViewProject } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
+import {
+  PROJECT_TRASH_RETENTION_DAYS,
+  getProjectTrashExpiry,
+  purgeExpiredDeletedProjects,
+  supportsProjectDeletedAt,
+} from '@/lib/project-trash';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
@@ -26,23 +34,17 @@ export async function GET(
     }
 
     const projectId = params.projectId;
+    const activeProjectWhere = supportsProjectDeletedAt()
+      ? { id: projectId, deletedAt: null }
+      : { id: projectId };
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-    });
-
-    if (!membership) {
-      return NextResponse.json(
-        { error: 'Not authorized' },
-        { status: 403 }
-      );
-    }
-
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
+    const project = await prisma.project.findFirst({
+      where: activeProjectWhere,
       include: {
         members: {
+          orderBy: {
+            createdAt: 'asc',
+          },
           include: {
             user: {
               select: { id: true, name: true, email: true },
@@ -59,7 +61,23 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(project);
+    const membership = project.members.find((member) => member.userId === userId);
+    if (!canUserViewProject(project.minRoleToView, membership?.role, session.user?.role)) {
+      return NextResponse.json(
+        { error: 'Not authorized' },
+        { status: 403 }
+      );
+    }
+
+    const creatorUserId = project.members[0]?.userId ?? null;
+    return NextResponse.json({
+      ...project,
+      canEdit: isGlobalAdmin(session.user?.role) || membership?.role === 'Admin' || membership?.role === 'Editor',
+      canDelete:
+        isGlobalAdmin(session.user?.role) ||
+        membership?.role === 'Admin' ||
+        creatorUserId === userId,
+    });
   } catch (error) {
     if ((error as Error).message === 'Unauthenticated') {
       return NextResponse.json(
@@ -92,13 +110,28 @@ export async function PUT(
     }
 
     const projectId = params.projectId;
+    const activeProjectWhere = supportsProjectDeletedAt()
+      ? { id: projectId, deletedAt: null }
+      : { id: projectId };
+
+    const activeProject = await prisma.project.findFirst({
+      where: activeProjectWhere,
+      select: { id: true },
+    });
+
+    if (!activeProject) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
     // Check authorization (must be Admin)
     const membership = await prisma.projectMembership.findUnique({
       where: { projectId_userId: { projectId, userId } },
     });
 
-    if (!membership || membership.role !== 'Admin') {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || membership.role !== 'Admin')) {
       return NextResponse.json(
         { error: 'Not authorized (Admin required)' },
         { status: 403 }
@@ -150,7 +183,7 @@ export async function PUT(
 
 // DELETE /api/projects/[projectId]
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { projectId: string } }
 ) {
   try {
@@ -165,24 +198,85 @@ export async function DELETE(
     }
 
     const projectId = params.projectId;
+    const permanentDeleteRequested = request.nextUrl.searchParams.get('permanent') === 'true';
+    const hasTrashSupport = supportsProjectDeletedAt();
+    await purgeExpiredDeletedProjects();
+    const projectWhere = hasTrashSupport
+      ? permanentDeleteRequested
+        ? { id: projectId, deletedAt: { not: null } }
+        : { id: projectId, deletedAt: null }
+      : { id: projectId };
 
-    // Check authorization (must be Admin)
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId, userId } },
+    const project = await prisma.project.findFirst({
+      where: projectWhere,
+      select: {
+        id: true,
+        members: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+          select: {
+            userId: true,
+            role: true,
+          },
+        },
+      },
     });
 
-    if (!membership || membership.role !== 'Admin') {
+    if (!project) {
       return NextResponse.json(
-        { error: 'Not authorized (Admin required)' },
+        { error: permanentDeleteRequested ? 'Project not found in Recycle Bin' : 'Project not found' },
+        { status: 404 }
+      );
+    }
+
+    const creatorUserId = project.members[0]?.userId ?? null;
+    const membership = project.members.find((member) => member.userId === userId);
+    if (
+      !isGlobalAdmin(session.user?.role) &&
+      creatorUserId !== userId &&
+      membership?.role !== 'Admin'
+    ) {
+      return NextResponse.json(
+        { error: 'Not authorized (Project creator, project Admin, or global Admin required)' },
         { status: 403 }
       );
     }
 
-    await prisma.project.delete({
+    if (!hasTrashSupport || permanentDeleteRequested) {
+      await prisma.project.delete({
+        where: { id: projectId },
+      });
+      return NextResponse.json({
+        success: true,
+        projectId,
+        deletedAt: null,
+        expiresAt: null,
+        retentionDays: 0,
+        permanentlyDeleted: true,
+      });
+    }
+
+    const deletedAt = new Date();
+    const trashedProject = await prisma.project.update({
       where: { id: projectId },
+      data: {
+        deletedAt,
+      },
+      select: {
+        id: true,
+        deletedAt: true,
+      },
     });
 
-    return NextResponse.json({ success: true });
+    const expiresAt = getProjectTrashExpiry(deletedAt);
+    return NextResponse.json({
+      success: true,
+      projectId: trashedProject.id,
+      deletedAt: trashedProject.deletedAt,
+      expiresAt,
+      retentionDays: PROJECT_TRASH_RETENTION_DAYS,
+    });
   } catch (error) {
     if ((error as Error).message === 'Unauthenticated') {
       return NextResponse.json(

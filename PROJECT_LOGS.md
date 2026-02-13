@@ -1,4 +1,4 @@
-# PROJECT LOGS – Testudo
+# PROJECT LOGS – Secudo
 
 **Central Logging System**  
 **Format:** Timestamped, Structured, Auditable  
@@ -44,7 +44,7 @@ All project events are logged here centrally with:
 Market Requirements Analysis:
 - Primary customer segment: Manufacturing engineers (50–500 emp)
 - Key feedback: "UI must be intuitive", "Dark mode appreciated", "Performance critical"
-- Competitive landscape: 2 major competitors, Testudo can differentiate on UX + compliance
+- Competitive landscape: 2 major competitors, Secudo can differentiate on UX + compliance
 
 Current Product State:
 - Completed: Requirements document, Agent role definitions
@@ -143,7 +143,7 @@ Rationale:
 **Task:** Implement Login/Register UI + Dashboard
 
 **Deliverables (Expected):**
-- ✅ /login page (TESTUDO branding, form)
+- ✅ /login page (SECUDO branding, form)
 - ✅ /register page (form with job title, company level)
 - ✅ /dashboard page (project list, create new)
 - ✅ responsive design (mobile-first)
@@ -157,7 +157,7 @@ Rationale:
 - `src/app/dashboard/page.tsx` (160 lines)
 
 **Quality Notes:**
-- Gradient UI with TESTUDO branding
+- Gradient UI with SECUDO branding
 - Dark mode theme applied
 - Tailwind CSS consistently used
 - Form validation and error handling

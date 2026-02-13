@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 
 const CreateComponentDataSchema = z.object({
   nodeId: z.string(),
@@ -21,6 +23,14 @@ async function getMembership(projectId: string, userId: string) {
   });
 }
 
+function isContainerCategory(rawCategory: string | undefined | null): boolean {
+  if (!rawCategory) {
+    return false;
+  }
+  const value = rawCategory.trim().toLowerCase();
+  return value === 'container' || value === 'system';
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { projectId: string } }
@@ -32,8 +42,12 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const membership = await getMembership(params.projectId, userId);
-    if (!membership) {
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    if (!access.canView) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -71,7 +85,7 @@ export async function POST(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 
@@ -85,6 +99,10 @@ export async function POST(
 
     if (!node || node.projectId !== params.projectId || !dataObject || dataObject.projectId !== params.projectId) {
       return NextResponse.json({ error: 'Node or data object not in project' }, { status: 400 });
+    }
+
+    if (isContainerCategory(node.category)) {
+      return NextResponse.json({ error: 'Data can only be assigned to components' }, { status: 400 });
     }
 
     const record = await prisma.componentData.upsert({
@@ -130,7 +148,7 @@ export async function DELETE(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 

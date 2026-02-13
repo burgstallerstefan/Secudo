@@ -9,6 +9,8 @@ const UpdateEdgeSchema = z.object({
   protocol: z.string().optional(),
   description: z.string().optional(),
   notes: z.string().optional(),
+  sourceHandleId: z.string().nullable().optional(),
+  targetHandleId: z.string().nullable().optional(),
 });
 
 async function getMembership(projectId: string, userId: string) {

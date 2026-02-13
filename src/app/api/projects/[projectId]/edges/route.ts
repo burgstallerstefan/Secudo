@@ -1,11 +1,15 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
 const CreateEdgeSchema = z.object({
   sourceNodeId: z.string(),
   targetNodeId: z.string(),
+  sourceHandleId: z.string().optional(),
+  targetHandleId: z.string().optional(),
   name: z.string().optional(),
   direction: z.enum(['A_TO_B', 'B_TO_A', 'BIDIRECTIONAL']).default('A_TO_B'),
   protocol: z.string().optional(),
@@ -28,12 +32,15 @@ export async function GET(
       );
     }
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId: params.projectId, userId } },
-    });
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
-    if (!membership) {
+    if (!access.canView) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
@@ -85,7 +92,7 @@ export async function POST(
       where: { projectId_userId: { projectId: params.projectId, userId } },
     });
 
-    if (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }
@@ -93,7 +100,8 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { sourceNodeId, targetNodeId, name, direction, protocol, description, notes } = CreateEdgeSchema.parse(body);
+    const { sourceNodeId, targetNodeId, sourceHandleId, targetHandleId, name, direction, protocol, description, notes } =
+      CreateEdgeSchema.parse(body);
 
     if (sourceNodeId === targetNodeId) {
       return NextResponse.json(
@@ -121,12 +129,32 @@ export async function POST(
         sourceNodeId,
         targetNodeId,
       },
+      include: {
+        sourceNode: true,
+        targetNode: true,
+        dataFlows: true,
+      },
     });
     if (existingEdge) {
-      return NextResponse.json(
-        { error: 'Edge already exists' },
-        { status: 409 }
-      );
+      if (sourceHandleId || targetHandleId) {
+        const shouldPatchHandles = !existingEdge.sourceHandleId || !existingEdge.targetHandleId;
+        if (shouldPatchHandles) {
+          const patchedEdge = await prisma.modelEdge.update({
+            where: { id: existingEdge.id },
+            data: {
+              sourceHandleId: existingEdge.sourceHandleId || sourceHandleId || null,
+              targetHandleId: existingEdge.targetHandleId || targetHandleId || null,
+            },
+            include: {
+              sourceNode: true,
+              targetNode: true,
+              dataFlows: true,
+            },
+          });
+          return NextResponse.json(patchedEdge, { status: 200 });
+        }
+      }
+      return NextResponse.json(existingEdge, { status: 200 });
     }
 
     const edge = await prisma.modelEdge.create({
@@ -134,6 +162,8 @@ export async function POST(
         projectId: params.projectId,
         sourceNodeId,
         targetNodeId,
+        sourceHandleId: sourceHandleId || null,
+        targetHandleId: targetHandleId || null,
         name,
         direction,
         protocol,

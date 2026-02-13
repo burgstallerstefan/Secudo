@@ -1,57 +1,107 @@
+name: secudo
+
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: tusedo-db
+    container_name: secudo-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-tusedo}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-tusedo-dev-password}
-      POSTGRES_DB: ${DB_NAME:-tusedo_dev}
+      POSTGRES_USER: ${DB_USER:-secudo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secudo-dev-password}
+      POSTGRES_DB: ${DB_NAME:-secudo_dev}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-tusedo} -d ${DB_NAME:-tusedo_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-secudo} -d ${DB_NAME:-secudo_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - tusedo-network
+      - secudo-network
 
   # Next.js Application (Development)
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: tusedo-app
+    container_name: secudo-app
     restart: unless-stopped
     user: "0:0"
     ports:
       - "3000:3000"
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: postgresql://${DB_USER:-tusedo}:${DB_PASSWORD:-tusedo-dev-password}@postgres:5432/${DB_NAME:-tusedo_dev}
+      DATABASE_URL: postgresql://${DB_USER:-secudo}:${DB_PASSWORD:-secudo-dev-password}@postgres:5432/${DB_NAME:-secudo_dev}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-key-change-in-production}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       NEXT_TELEMETRY_DISABLED: 1
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-90000}
+      OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-0.2}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-1600}
+      OLLAMA_RETRY_COUNT: ${OLLAMA_RETRY_COUNT:-1}
+      OLLAMA_AUTO_PULL: ${OLLAMA_AUTO_PULL:-true}
+      OLLAMA_STATUS_CACHE_TTL_MS: ${OLLAMA_STATUS_CACHE_TTL_MS:-15000}
     depends_on:
       postgres:
         condition: service_healthy
+      ollama:
+        condition: service_started
     volumes:
       - .:/app
       - /app/node_modules
       - /app/.next
     networks:
-      - tusedo-network
+      - secudo-network
     command: sh -c "npx prisma generate && npx prisma db push --accept-data-loss && npm run dev"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: secudo-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - secudo-network
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: secudo-ollama-init
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    depends_on:
+      ollama:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "until ollama list >/dev/null 2>&1; do sleep 2; done;
+      ollama pull ${OLLAMA_MODEL};
+      ollama list"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - secudo-network
 
 volumes:
   postgres_data:
     driver: local
+  ollama_data:
+    driver: local
 
 networks:
-  tusedo-network:
+  secudo-network:
     driver: bridge

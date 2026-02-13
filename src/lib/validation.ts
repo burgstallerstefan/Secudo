@@ -13,10 +13,11 @@ export const loginSchema = z.object({
 export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  name: z.string().min(2),
+  firstName: z.string().min(2),
+  lastName: z.string().min(2),
   jobTitle: z.string().optional(),
   company: z.string().optional(),
-  companyLevel: z.enum(['SME', 'Enterprise', 'Consultant', 'Student']).optional(),
+  role: z.enum(['Viewer', 'Editor', 'Admin']).optional(),
 });
 
 // Project
@@ -32,8 +33,7 @@ export const updateProjectSchema = createProjectSchema.partial();
 // Model Node
 export const createNodeSchema = z.object({
   name: z.string().min(1).max(255),
-  category: z.enum(['Component', 'Human', 'System']),
-  subtype: z.string().optional(),
+  category: z.enum(['Container', 'Component']).default('Component'),
   parentNodeId: z.string().min(1).nullable().optional(),
   description: z.string().optional(),
   notes: z.string().optional(),
@@ -73,9 +73,30 @@ export const createDataObjectSchema = z.object({
 });
 
 // Answer
+const isValidFulfillmentAnswerValue = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (trimmed.toUpperCase() === 'N/A') {
+    return true;
+  }
+  return /^(10|[0-9])$/.test(trimmed);
+};
+
+const normalizeFulfillmentAnswerValue = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.toUpperCase() === 'N/A') {
+    return 'N/A';
+  }
+  return String(Number.parseInt(trimmed, 10));
+};
+
 export const answerSchema = z.object({
   questionId: z.string().min(1),
-  answerValue: z.string().min(1),
+  answerValue: z
+    .string()
+    .refine(isValidFulfillmentAnswerValue, {
+      message: 'answerValue must be a number from 0 to 10 or N/A',
+    })
+    .transform(normalizeFulfillmentAnswerValue),
   targetType: z.enum(['Component', 'Edge', 'DataObject', 'None']).optional(),
   targetId: z.string().optional(),
   comment: z.string().optional(),

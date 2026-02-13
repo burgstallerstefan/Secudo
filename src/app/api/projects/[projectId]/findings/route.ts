@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { getProjectViewAccess } from '@/lib/project-access';
+import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
 
@@ -27,12 +29,15 @@ export async function GET(
       );
     }
 
-    // Check authorization
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId: params.projectId, userId } },
-    });
+    const access = await getProjectViewAccess(params.projectId, userId, session.user?.role);
+    if (!access.exists) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
 
-    if (!membership) {
+    if (!access.canView) {
       return NextResponse.json(
         { error: 'Not authorized' },
         { status: 403 }
@@ -82,7 +87,7 @@ export async function POST(
       where: { projectId_userId: { projectId: params.projectId, userId } },
     });
 
-    if (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin')) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || (membership.role !== 'Editor' && membership.role !== 'Admin'))) {
       return NextResponse.json(
         { error: 'Not authorized (Editor required)' },
         { status: 403 }

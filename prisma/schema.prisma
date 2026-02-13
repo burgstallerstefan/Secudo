@@ -17,12 +17,14 @@ datasource db {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
+  firstName String?
+  lastName  String?
   name      String?
+  role      String   @default("Viewer") // Admin, Editor, Viewer
   password  String?
   avatar    String?
   jobTitle  String?
   company   String?
-  companyLevel String? // SME, Enterprise, Consultant, Student
 
   // Relations
   projects       ProjectMembership[]
@@ -31,12 +33,14 @@ model User {
   createdEdges   ModelEdge[]         @relation("CreatedEdges")
   createdAnswers Answer[]
   createdMeasures Measure[]
+  canonicalModelSavepoints CanonicalModelSavepoint[]
 
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([email])
+  @@index([role])
 }
 
 // ============================================
@@ -49,6 +53,7 @@ model Project {
   description String?
   norm        String   @default("IEC 62443") // Assessment standard
   minRoleToView String  @default("any") // any, viewer, editor, admin, private
+  deletedAt   DateTime?
 
   // Relations
   members       ProjectMembership[]
@@ -57,12 +62,14 @@ model Project {
   dataObjects   DataObject[]
   answers       Answer[]
   measures      Measure[]
+  canonicalModelSavepoints CanonicalModelSavepoint[]
 
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model ProjectMembership {
@@ -94,7 +101,6 @@ model ModelNode {
   stableId        String   // Human-readable ID
   name            String
   category        String   // Component, Human, System
-  subtype         String?  // Software, Hardware, Mixed, Operator, etc.
   description     String?
   notes           String?
   
@@ -127,6 +133,8 @@ model ModelEdge {
   projectId       String
   sourceNodeId    String
   targetNodeId    String
+  sourceHandleId  String?
+  targetHandleId  String?
   name            String?
   direction       String   @default("A_TO_B") // A_TO_B, B_TO_A, BIDIRECTIONAL
   protocol        String?  // REST, MQTT, HTTP, etc.
@@ -145,7 +153,7 @@ model ModelEdge {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([projectId, sourceNodeId, targetNodeId])
+  @@index([projectId, sourceNodeId, targetNodeId])
   @@index([projectId])
   @@index([sourceNodeId])
   @@index([targetNodeId])
@@ -360,4 +368,19 @@ model Report {
   format          String   @default("PDF") // PDF, HTML, JSON
 
   @@index([projectId])
+}
+
+model CanonicalModelSavepoint {
+  id              String   @id @default(cuid())
+  projectId       String
+  title           String
+  modelJson       String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+
+  @@index([projectId, createdAt])
 }

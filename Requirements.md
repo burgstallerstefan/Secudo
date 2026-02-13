@@ -1,10 +1,10 @@
-# Testudo – Product Security Assessment Tool
-## requirements.md
+# Secudo – Product Security Assessment Tool
+## Requirements
 
 ---
 
 ## 0. Vision
-Testudo ist ein webbasiertes Security-Assessment-Tool für Produkt- und Systemarchitekturen.  
+Secudo ist ein webbasiertes Security-Assessment-Tool für Produkt- und Systemarchitekturen.  
 Es kombiniert ein **kanonisches Systemmodell** mit **normbasierten Fragen**, **Risikobewertung** und **automatischer Maßnahmenableitung**.
 
 Ziele:
@@ -13,6 +13,11 @@ Ziele:
 - Ableitung von Risiken und Maßnahmen pro Asset
 - Automatischer Security-Report
 - **Schnelle Modellierung aus natürlicher Sprache** (KI-Assistenz)
+
+Zielgruppen:
+- **Manufacturing Engineers** (50–500 Mitarbeiter): Visuelle Modellierung, schnelles Assessment
+- **Consultants & Systemintegratoren** (1–50): Multi-Projekt-Support, Reports
+- **Enterprise Security Teams** (1000+): Erweiterte RBAC, Audit Trails, API-Integration
 
 ---
 
@@ -56,7 +61,7 @@ Ziele:
 Beim ersten Aufruf sieht der Nutzer:
 
 Zentrales Element:
-- Großer Schriftzug: **TESTUDO**
+- Großer Schriftzug: **SECUDO**
 
 Stil:
 - Retro-Pixel-Font
@@ -170,6 +175,85 @@ Das Modell ist die **Single Source of Truth** für:
 - Komponenten/People/Interfaces
 - verschachtelte Strukturen (Systeme → Subsysteme → Komponenten)
 - Datenobjekte (Information Assets), die **in Komponenten liegen** oder **über Interfaces fließen**
+
+#### Beispielarchitektur (Mermaid)
+
+```mermaid
+graph TB
+    subgraph Machine["🖥️ Machine (System)"]
+        direction TB
+        
+        subgraph Control["⚙️ Control (Subsystem)"]
+            PLC["PLC<br/><small>Hardware</small>"]
+            SafetyPLC["Safety PLC<br/><small>Hardware</small>"]
+        end
+        
+        subgraph HMI_Sub["🖥️ HMI (Subsystem)"]
+            BendControlUI["BendControl UI<br/><small>Software</small>"]
+        end
+        
+        subgraph Network["🔌 Network (Subsystem)"]
+            Switch["Switch<br/><small>Hardware</small>"]
+            Firewall["Firewall<br/><small>Hardware</small>"]
+        end
+    end
+
+    subgraph Cloud["☁️ Cloud (System)"]
+        Backend["Backend<br/><small>Software</small>"]
+        UpdateServer["Update Server<br/><small>Software</small>"]
+        DB[("Datenbank<br/><small>Software</small>")]
+    end
+
+    Operator(["👷 Operator<br/><small>Human</small>"])
+    Technician(["🔧 Techniker<br/><small>Human</small>"])
+
+    Operator -->|"Bedienung"| BendControlUI
+    Technician -->|"Wartung / SSH"| PLC
+    BendControlUI -->|"Profinet"| PLC
+    BendControlUI -->|"Safety Profinet"| SafetyPLC
+    BendControlUI <-->|"REST / HTTPS"| Backend
+    PLC -->|"Ethernet"| Switch
+    Switch -->|"Ethernet"| Firewall
+    Firewall <-->|"HTTPS"| Backend
+    Backend -->|"SQL"| DB
+    UpdateServer -->|"OTA Update"| PLC
+    UpdateServer -->|"OTA Update"| BendControlUI
+
+    style Machine fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+    style Control fill:#334155,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
+    style HMI_Sub fill:#334155,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
+    style Network fill:#334155,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
+    style Cloud fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#f8fafc
+    style Operator fill:#7c3aed,stroke:#a78bfa,color:#f8fafc
+    style Technician fill:#7c3aed,stroke:#a78bfa,color:#f8fafc
+```
+
+#### Datenobjekte im Modell (Mermaid)
+
+```mermaid
+graph LR
+    subgraph Backend_DO["Backend"]
+        DO_Creds["🔑 User Credentials<br/><small>Credentials · Stores</small>"]
+        DO_Config["⚙️ Config Data<br/><small>Configuration · Processes</small>"]
+    end
+
+    subgraph PLC_DO["PLC"]
+        DO_Safety["🛡️ Safety Parameters<br/><small>SafetyRelevant · Processes</small>"]
+        DO_Firmware["📦 Firmware<br/><small>IntellectualProperty · Stores</small>"]
+    end
+
+    subgraph HMI_DO["BendControl UI"]
+        DO_Telemetry["📊 Telemetry<br/><small>Telemetry · Generates</small>"]
+        DO_Logs["📝 Logs<br/><small>Logs · Generates</small>"]
+    end
+
+    DO_Telemetry -.->|"Data-in-Transit<br/>REST / HTTPS"| DO_Config
+    DO_Safety -.->|"Data-in-Transit<br/>Profinet"| DO_Logs
+
+    style Backend_DO fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#f8fafc
+    style PLC_DO fill:#334155,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
+    style HMI_DO fill:#334155,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+```
 
 ---
 
@@ -539,7 +623,7 @@ User soll schreiben können:
 > Komponente B macht Y.  
 > Daten ‘Datenpaket Z’ liegt in A und fließt von A nach B über REST.”
 
-Und Testudo erzeugt daraus **Vorschläge** für:
+Und Secudo erzeugt daraus **Vorschläge** für:
 - neue Komponenten (inkl. verschachtelte Struktur)
 - neue Interfaces
 - Datenobjekte
@@ -638,3 +722,102 @@ Die KI muss **strukturierte JSON** liefern (kein Fließtext):
     "Tablet wird genutzt, aber unklar ob als eigene Komponente modelliert werden soll."
   ]
 }
+```
+
+---
+
+## 16. Datenmodell-Zusammenspiel (ER-Diagramm)
+
+```mermaid
+erDiagram
+    Project ||--o{ ModelNode : "hat"
+    Project ||--o{ ModelEdge : "hat"
+    Project ||--o{ DataObject : "hat"
+    
+    ModelNode ||--o{ ModelNode : "parentNodeId (Hierarchie)"
+    ModelNode ||--o{ ModelEdge : "sourceNodeId"
+    ModelNode ||--o{ ModelEdge : "targetNodeId"
+    ModelNode ||--o{ ComponentData : "enthält"
+    
+    ModelEdge ||--o{ EdgeDataFlow : "transportiert"
+    
+    DataObject ||--o{ ComponentData : "liegt in"
+    DataObject ||--o{ EdgeDataFlow : "fließt über"
+
+    ModelNode {
+        string id PK
+        string name
+        string category
+        string subtype
+        string parentNodeId FK
+    }
+    ModelEdge {
+        string id PK
+        string sourceNodeId FK
+        string targetNodeId FK
+        string direction
+        string protocol
+    }
+    DataObject {
+        string id PK
+        string name
+        string dataClass
+        int confidentiality
+        int integrity
+        int availability
+    }
+    ComponentData {
+        string nodeId FK
+        string dataObjectId FK
+        string role
+    }
+    EdgeDataFlow {
+        string edgeId FK
+        string dataObjectId FK
+        string direction
+    }
+```
+
+---
+
+## 17. Performance-Anforderungen
+
+| Metrik | Ziel | Begründung |
+|---|---|---|
+| Seitenlade-Zeit | < 3s | Standard SaaS-Erwartung |
+| Diagramm-Rendering | < 1s für 200 Nodes | Kunden melden Lag bei komplexen Architekturen |
+| Modell-Speichern | < 500ms | User sollen nicht warten |
+| Fragen laden | < 2s | Assessment-Flow muss flüssig sein |
+| Report-Generierung | < 3s | PDF-Export soll UI nicht blockieren |
+| Suche/Filter | < 500ms | Echtzeit-Feedback nötig |
+
+---
+
+## 18. KI-Assistenz: Technische Umsetzung
+
+### 18.1 Lokales LLM (kein Internet nötig)
+
+Die KI-Assistenz läuft **komplett offline** via Ollama im Docker-Container:
+
+```yaml
+# docker-compose.yml
+services:
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+```
+
+Empfohlenes Modell: **Qwen 2.5-Coder 3B** (~2 GB, ~3 GB RAM)
+
+### 18.2 Ablauf
+
+```
+App Container  →  http://ollama:11434/api/generate  →  Ollama Container
+```
+
+- Kein API-Key, kein Internet, keine externen Dienste
+- Daten verlassen nie den Rechner
+- System-Prompt gibt JSON-Schema vor (siehe 15.3)

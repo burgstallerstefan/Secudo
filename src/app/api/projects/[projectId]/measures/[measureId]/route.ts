@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
+import { isGlobalAdmin } from '@/lib/user-role';
 
 const UpdateMeasureSchema = z.object({
   title: z.string().min(1).optional(),
@@ -9,7 +10,7 @@ const UpdateMeasureSchema = z.object({
   priority: z.enum(['Low', 'Medium', 'High', 'Critical']).optional(),
   status: z.enum(['Open', 'InProgress', 'Done']).optional(),
   assignedTo: z.string().optional(),
-  dueDate: z.string().optional(),
+  dueDate: z.string().optional().nullable(),
 });
 
 async function getMembership(projectId: string, userId: string) {
@@ -30,7 +31,7 @@ export async function GET(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership) {
+    if (!isGlobalAdmin(session.user?.role) && !membership) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -65,7 +66,7 @@ export async function PUT(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 
@@ -82,12 +83,47 @@ export async function PUT(
       return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
     }
 
+    const updateData: {
+      title?: string;
+      description?: string;
+      priority?: 'Low' | 'Medium' | 'High' | 'Critical';
+      status?: 'Open' | 'InProgress' | 'Done';
+      assignedTo?: string | null;
+      dueDate?: Date | null;
+    } = {};
+
+    if (data.title !== undefined) {
+      updateData.title = data.title;
+    }
+    if (data.description !== undefined) {
+      updateData.description = data.description;
+    }
+    if (data.priority !== undefined) {
+      updateData.priority = data.priority;
+    }
+    if (data.status !== undefined) {
+      updateData.status = data.status;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'assignedTo')) {
+      updateData.assignedTo = data.assignedTo?.trim() || null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(data, 'dueDate')) {
+      if (!data.dueDate) {
+        updateData.dueDate = null;
+      } else {
+        const parsedDueDate = new Date(data.dueDate);
+        if (Number.isNaN(parsedDueDate.getTime())) {
+          return NextResponse.json({ error: 'Invalid dueDate' }, { status: 400 });
+        }
+        updateData.dueDate = parsedDueDate;
+      }
+    }
+
     const updated = await prisma.measure.update({
       where: { id: params.measureId },
-      data: {
-        ...data,
-        dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
-      },
+      data: updateData,
       include: { finding: true },
     });
 
@@ -116,7 +152,7 @@ export async function DELETE(
     }
 
     const membership = await getMembership(params.projectId, userId);
-    if (!membership || !['Admin', 'Editor'].includes(membership.role)) {
+    if (!isGlobalAdmin(session.user?.role) && (!membership || !['Admin', 'Editor'].includes(membership.role))) {
       return NextResponse.json({ error: 'Not authorized (Editor required)' }, { status: 403 });
     }
 
