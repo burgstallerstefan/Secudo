@@ -32,6 +32,7 @@ export default function ReportPreview({ projectId }: { projectId: string }) {
   const [report, setReport] = useState<ReportData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchReportData();
@@ -95,6 +96,7 @@ export default function ReportPreview({ projectId }: { projectId: string }) {
 
   const handleExportPDF = async () => {
     setIsExporting(true);
+    setExportError(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/report/pdf`, {
         method: 'GET',
@@ -113,9 +115,10 @@ export default function ReportPreview({ projectId }: { projectId: string }) {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(downloadUrl);
+      setExportError(null);
     } catch (error) {
       console.error('Failed to export PDF:', error);
-      window.alert((error as Error).message || 'Failed to export PDF');
+      setExportError((error as Error).message || 'Failed to export PDF');
     } finally {
       setIsExporting(false);
     }
@@ -131,6 +134,18 @@ export default function ReportPreview({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-6">
+      {exportError && (
+        <button
+          type="button"
+          onClick={() => setExportError(null)}
+          className="w-full rounded border border-red-500/40 bg-red-900/20 px-4 py-3 text-left text-sm text-red-200 transition hover:bg-red-900/30"
+          aria-label="Dismiss export error"
+          title="Click to dismiss"
+        >
+          {exportError}
+        </button>
+      )}
+
       {/* Export Button */}
       <div className="flex gap-2">
         <Button onClick={handleExportPDF} disabled={isExporting}>

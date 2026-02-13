@@ -131,6 +131,8 @@ interface DashboardViewProps {
   settingsOnly?: boolean;
 }
 
+type ProjectExportFormat = 'secudo' | 'oscal';
+
 const PROJECT_INVITE_ROLE_SECTIONS: Array<{
   role: ProjectInviteRole;
   title: string;
@@ -202,6 +204,7 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [selectedTrashedProjectIds, setSelectedTrashedProjectIds] = useState<string[]>([]);
   const [isExportingProjects, setIsExportingProjects] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isImportingProjects, setIsImportingProjects] = useState(false);
   const [isDeletingSelectedProjects, setIsDeletingSelectedProjects] = useState(false);
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -239,6 +242,7 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
   const [activeSectionId, setActiveSectionId] = useState(settingsOnly ? 'profile' : 'projects');
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const hasFetchedProjectsOnStartRef = useRef(false);
   const hasFetchedInviteCandidatesOnStartRef = useRef(false);
@@ -292,19 +296,24 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
   const totalSelectedDeletableProjectsCount =
     selectedDeletableProjectIds.length + selectedDeletableTrashedProjectIds.length;
   const hasProjects = projects.length > 0;
+  const isExportActionDisabled =
+    !hasProjects ||
+    selectedProjectIds.length === 0 ||
+    isExportingProjects ||
+    isImportingProjects ||
+    isDeletingSelectedProjects ||
+    Boolean(restoringProjectId) ||
+    Boolean(permanentlyDeletingProjectId);
   const sections = useMemo<DashboardSection[]>(() => {
     const sectionItems: DashboardSection[] = settingsOnly
       ? [{ id: 'profile', label: 'Profile' }]
-      : [
-          { id: 'projects', label: 'Projects' },
-          { id: 'profile', label: 'Profile' },
-        ];
+      : [{ id: 'projects', label: 'Projects' }];
 
-    if (canManageRoles) {
+    if (settingsOnly && canManageRoles) {
       sectionItems.push({ id: 'user-roles', label: 'Users' });
     }
 
-    if (isGlobalAdminUser) {
+    if (settingsOnly && isGlobalAdminUser) {
       sectionItems.push({ id: 'groups', label: 'Groups' });
     }
 
@@ -348,18 +357,18 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
   }, [status, settingsOnly]);
 
   useEffect(() => {
-    if (status === 'authenticated' && canManageRoles && !hasFetchedUsersOnStartRef.current) {
+    if (status === 'authenticated' && settingsOnly && canManageRoles && !hasFetchedUsersOnStartRef.current) {
       hasFetchedUsersOnStartRef.current = true;
       void fetchUsers();
     }
-  }, [status, canManageRoles]);
+  }, [status, settingsOnly, canManageRoles]);
 
   useEffect(() => {
-    if (status === 'authenticated' && isGlobalAdminUser && !hasFetchedGroupsOnStartRef.current) {
+    if (status === 'authenticated' && settingsOnly && isGlobalAdminUser && !hasFetchedGroupsOnStartRef.current) {
       hasFetchedGroupsOnStartRef.current = true;
       void fetchGroups();
     }
-  }, [status, isGlobalAdminUser]);
+  }, [status, settingsOnly, isGlobalAdminUser]);
 
   useEffect(() => {
     if (status === 'authenticated' && !hasFetchedProfileOnStartRef.current) {
@@ -402,6 +411,38 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
       invitedGroups: previous.invitedGroups.filter((invite) => availableGroupIds.has(invite.groupId)),
     }));
   }, [selectableInviteUsers, inviteGroups]);
+
+  useEffect(() => {
+    if (!isExportMenuOpen) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isExportMenuOpen]);
+
+  useEffect(() => {
+    if (isExportActionDisabled) {
+      setIsExportMenuOpen(false);
+    }
+  }, [isExportActionDisabled]);
 
   useEffect(() => {
     const updateActiveSection = () => {
@@ -1196,12 +1237,13 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
     );
   };
 
-  const handleExportSelectedProjects = async () => {
-    if (!hasProjects || isExportingProjects || selectedProjectIds.length === 0) {
+  const handleExportSelectedProjects = async (format: ProjectExportFormat) => {
+    if (isExportActionDisabled) {
       return;
     }
 
     try {
+      setIsExportMenuOpen(false);
       setError('');
       setSuccessMessage('');
       setIsExportingProjects(true);
@@ -1209,13 +1251,14 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
       const response = await fetch('/api/project-export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectIds: selectedProjectIds }),
+        body: JSON.stringify({ projectIds: selectedProjectIds, format }),
       });
 
       const payload = (await response.json().catch(() => null)) as
         | {
             error?: string;
             projects?: unknown[];
+            documents?: unknown[];
           }
         | null;
 
@@ -1223,10 +1266,21 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
         throw new Error(payload?.error || 'Failed to export selected projects');
       }
 
+      let downloadPayload: unknown = payload;
+      if (format === 'oscal') {
+        const oscalDocuments = Array.isArray(payload?.documents) ? payload.documents : [];
+        if (oscalDocuments.length === 1) {
+          [downloadPayload] = oscalDocuments;
+        } else if (oscalDocuments.length > 1) {
+          downloadPayload = oscalDocuments;
+        }
+      }
+
       const now = new Date();
       const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
-      const fileName = `secudo-project-export-${timestamp}.json`;
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const filePrefix = format === 'oscal' ? 'oscal-project-export' : 'secudo-project-export';
+      const fileName = `${filePrefix}-${timestamp}.json`;
+      const blob = new Blob([JSON.stringify(downloadPayload, null, 2)], { type: 'application/json' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = downloadUrl;
@@ -1236,8 +1290,17 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
       anchor.remove();
       window.URL.revokeObjectURL(downloadUrl);
 
-      const exportedCount = Array.isArray(payload?.projects) ? payload.projects.length : selectedProjectIds.length;
-      setSuccessMessage(`Exported ${exportedCount} project(s).`);
+      const exportedCount =
+        format === 'oscal'
+          ? Array.isArray(payload?.documents)
+            ? payload.documents.length
+            : selectedProjectIds.length
+          : Array.isArray(payload?.projects)
+            ? payload.projects.length
+            : selectedProjectIds.length;
+      setSuccessMessage(
+        `Exported ${exportedCount} project(s) as ${format === 'oscal' ? 'OSCAL' : 'Secudo'}.`
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1456,28 +1519,26 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <InviteNotificationsBell />
-              <button
-                type="button"
-                onClick={() => {
-                  if (settingsOnly) {
-                    scrollToSection('profile');
-                    return;
-                  }
-                  router.push('/settings');
-                }}
-                className="rounded-lg border border-slate-600 bg-slate-700/80 p-2 text-slate-300 transition-colors hover:bg-slate-600 hover:text-white"
-                aria-label="Open settings"
-                title="Settings"
-              >
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M10.45 3.18a1.75 1.75 0 0 1 3.1 0l.44.9a1.75 1.75 0 0 0 2.1.93l.99-.3a1.75 1.75 0 0 1 2.2 2.2l-.3.99a1.75 1.75 0 0 0 .93 2.1l.9.44a1.75 1.75 0 0 1 0 3.1l-.9.44a1.75 1.75 0 0 0-.93 2.1l.3.99a1.75 1.75 0 0 1-2.2 2.2l-.99-.3a1.75 1.75 0 0 0-2.1.93l-.44.9a1.75 1.75 0 0 1-3.1 0l-.44-.9a1.75 1.75 0 0 0-2.1-.93l-.99.3a1.75 1.75 0 0 1-2.2-2.2l.3-.99a1.75 1.75 0 0 0-.93-2.1l-.9-.44a1.75 1.75 0 0 1 0-3.1l.9-.44a1.75 1.75 0 0 0 .93-2.1l-.3-.99a1.75 1.75 0 0 1 2.2-2.2l.99.3a1.75 1.75 0 0 0 2.1-.93l.44-.9Z"
-                  />
-                  <circle cx="12" cy="12" r="3.2" />
-                </svg>
-              </button>
+              {!settingsOnly && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push('/settings');
+                  }}
+                  className="rounded-lg border border-slate-600 bg-slate-700/80 p-2 text-slate-300 transition-colors hover:bg-slate-600 hover:text-white"
+                  aria-label="Open settings"
+                  title="Settings"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10.45 3.18a1.75 1.75 0 0 1 3.1 0l.44.9a1.75 1.75 0 0 0 2.1.93l.99-.3a1.75 1.75 0 0 1 2.2 2.2l-.3.99a1.75 1.75 0 0 0 .93 2.1l.9.44a1.75 1.75 0 0 1 0 3.1l-.9.44a1.75 1.75 0 0 0-.93 2.1l.3.99a1.75 1.75 0 0 1-2.2 2.2l-.99-.3a1.75 1.75 0 0 0-2.1.93l-.44.9a1.75 1.75 0 0 1-3.1 0l-.44-.9a1.75 1.75 0 0 0-2.1-.93l-.99.3a1.75 1.75 0 0 1-2.2-2.2l.3-.99a1.75 1.75 0 0 0-.93-2.1l-.9-.44a1.75 1.75 0 0 1 0-3.1l.9-.44a1.75 1.75 0 0 0 .93-2.1l-.3-.99a1.75 1.75 0 0 1 2.2-2.2l.99.3a1.75 1.75 0 0 0 2.1-.93l.44-.9Z"
+                    />
+                    <circle cx="12" cy="12" r="3.2" />
+                  </svg>
+                </button>
+              )}
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate-400">Profile</p>
@@ -1549,22 +1610,45 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
               >
                 {isDeletingSelectedProjects ? 'Deleting...' : 'Delete Selected'}
               </button>
-              <button
-                type="button"
-                onClick={() => void handleExportSelectedProjects()}
-                disabled={
-                  !hasProjects ||
-                  selectedProjectIds.length === 0 ||
-                  isExportingProjects ||
-                  isImportingProjects ||
-                  isDeletingSelectedProjects ||
-                  Boolean(restoringProjectId) ||
-                  Boolean(permanentlyDeletingProjectId)
-                }
-                className="rounded border border-cyan-500/40 bg-cyan-900/20 px-4 py-2 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isExportingProjects ? 'Exporting...' : 'Export Selected'}
-              </button>
+              <div ref={exportMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsExportMenuOpen((previous) => !previous)}
+                  disabled={isExportActionDisabled}
+                  aria-haspopup="menu"
+                  aria-expanded={isExportMenuOpen}
+                  className="inline-flex items-center gap-2 rounded border border-cyan-500/40 bg-cyan-900/20 px-4 py-2 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isExportingProjects ? 'Exporting...' : 'Export Selected'}
+                  <span aria-hidden="true" className="text-[10px] leading-none text-cyan-300">
+                    {isExportMenuOpen ? '^' : 'v'}
+                  </span>
+                </button>
+                {isExportMenuOpen && !isExportActionDisabled ? (
+                  <div
+                    role="menu"
+                    aria-label="Export format"
+                    className="absolute right-0 z-20 mt-2 w-40 overflow-hidden rounded border border-cyan-500/40 bg-slate-900 shadow-xl"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => void handleExportSelectedProjects('secudo')}
+                      className="block w-full border-b border-slate-700 px-4 py-2 text-left text-sm font-semibold text-cyan-100 transition-colors hover:bg-slate-800"
+                    >
+                      Secudo
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => void handleExportSelectedProjects('oscal')}
+                      className="block w-full px-4 py-2 text-left text-sm font-semibold text-cyan-100 transition-colors hover:bg-slate-800"
+                    >
+                      OSCAL
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={handleImportButtonClick}
@@ -1913,7 +1997,8 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
             </section>
             )}
 
-            <section id="profile" className="scroll-mt-32 rounded-lg border border-slate-700 bg-slate-800/45 p-6">
+            {settingsOnly && (
+              <section id="profile" className="scroll-mt-32 rounded-lg border border-slate-700 bg-slate-800/45 p-6">
               <div className="mb-5">
                 <h2 className="text-2xl font-bold text-white">Settings</h2>
                 <p className="text-slate-400">Profile fields mirror the registration form.</p>
@@ -2011,9 +2096,10 @@ export default function DashboardView({ settingsOnly = false }: DashboardViewPro
                   </button>
                 </form>
               )}
-            </section>
+              </section>
+            )}
 
-            {canManageRoles && (
+            {settingsOnly && canManageRoles && (
               <section id="user-roles" className="scroll-mt-32 rounded-lg border border-slate-700 bg-slate-800/45 p-6">
             <div className="mb-5">
               <h2 className="text-3xl font-bold text-white mb-2">User Role Management</h2>

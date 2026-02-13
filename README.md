@@ -15,44 +15,48 @@ Kombiniert ein **kanonisches Systemmodell** mit **normbasierten Fragen**, **Risi
 ### 1. Environment-Datei erstellen
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-`.env.local` Inhalt:
+`.env` Inhalt:
 ```env
-DATABASE_URL="postgresql://secudo:password@postgres:5432/secudo_dev"
+DATABASE_URL="postgresql://secudo:secudo-dev-password@postgres:5432/secudo_dev"
 NEXTAUTH_URL="http://localhost:3000"
 NEXTAUTH_SECRET="your-secret-key-here"   # openssl rand -base64 32
-NEXT_PUBLIC_BASE_URL="http://localhost:3000"
-DB_USER=secudo
-DB_PASSWORD=password
-DB_NAME=secudo_dev
+NEXT_PUBLIC_API_URL="http://localhost:3000/api"
+DB_USER="secudo"
+DB_PASSWORD="secudo-dev-password"
+DB_NAME="secudo_dev"
 OLLAMA_BASE_URL="http://ollama:11434"
 OLLAMA_MODEL="qwen2.5:3b"
-OLLAMA_AUTO_PULL="false"
+OLLAMA_AUTO_PULL="true"
 OLLAMA_STATUS_CACHE_TTL_MS="15000"
 ```
 
 ### 2. Docker starten
 
 ```bash
-docker-compose up -d
+# Standard (App + PostgreSQL)
+docker compose up -d
+
+# Optional: mit Ollama Service
+docker compose --profile ai up -d
 ```
 
 Das startet:
 - PostgreSQL 16 Datenbank
 - Next.js Applikation
-- Ollama AI Service
 - Prisma Migrations automatisch
-- Seed-Daten
 
-Hinweis: Beim ersten Start wird das Ollama-Modell geladen. Das kann mehrere Minuten dauern.
+Optional mit `--profile ai`:
+- Ollama AI Service
+- Modell-Pull via `ollama-init` (beim ersten Start kann das mehrere Minuten dauern)
 
 ### 3. Zugriff
 
 - **App:** http://localhost:3000
 - **Datenbank:** localhost:5432
-- **Ollama API:** http://localhost:11434
+- **Ollama API:** http://localhost:11434 (nur mit `--profile ai`)
 
 ### Standard-Admin Login
 
@@ -259,28 +263,31 @@ Measure                 # Maßnahmen
 
 ```bash
 # Starten
-docker-compose up -d
+docker compose up -d
 
 # Logs anzeigen
-docker-compose logs -f
-docker-compose logs -f app
-docker-compose logs -f postgres
+docker compose logs -f
+docker compose logs -f app
+docker compose logs -f postgres
+
+# Optional AI-Services starten
+docker compose --profile ai up -d
 
 # Prisma Migrations
-docker-compose exec app npx prisma migrate dev
+docker compose exec app npx prisma migrate dev
 
 # Datenbank zurücksetzen
-docker-compose exec app npx prisma migrate reset
+docker compose exec app npx prisma migrate reset
 
 # Prisma Studio (DB-Browser)
-docker-compose exec app npx prisma studio
+docker compose exec app npx prisma studio
 
 # Neu bauen (ohne Cache)
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Komplett zurücksetzen (inkl. Volumes)
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
 ### Production Build
@@ -324,8 +331,8 @@ docker run -p 3000:3000 \
 | Problem | Lösung |
 |---|---|
 | Port 5432 belegt | `docker ps` → anderen Container stoppen |
-| DB-Verbindung fehlgeschlagen | `DATABASE_URL` in `.env.local` prüfen (im Docker: `postgres`, nicht `localhost`) |
-| Migrations fehlgeschlagen | `docker-compose down -v && docker-compose up -d` |
+| DB-Verbindung fehlgeschlagen | `DATABASE_URL` in `.env` prüfen (im Docker: `postgres`, nicht `localhost`) |
+| Migrations fehlgeschlagen | `docker compose down -v && docker compose up -d` |
 | Session undefined | Browser-Cookies löschen, neu einloggen |
 
 ---
