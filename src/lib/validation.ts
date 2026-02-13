@@ -3,6 +3,21 @@
  */
 
 import { z } from 'zod';
+import { PROJECT_NORMS } from '@/lib/project-norm';
+
+const projectInviteRoleSchema = z
+  .enum(['User', 'Admin', 'Viewer', 'Editor'])
+  .transform((role) => (role === 'Admin' ? 'Admin' : 'User'));
+
+const projectInviteUserSchema = z.object({
+  userId: z.string().min(1),
+  role: projectInviteRoleSchema.default('User'),
+});
+
+const projectInviteGroupSchema = z.object({
+  groupId: z.string().min(1),
+  role: projectInviteRoleSchema.default('User'),
+});
 
 // Auth
 export const loginSchema = z.object({
@@ -17,15 +32,20 @@ export const registerSchema = z.object({
   lastName: z.string().min(2),
   jobTitle: z.string().optional(),
   company: z.string().optional(),
-  role: z.enum(['Viewer', 'Editor', 'Admin']).optional(),
+  role: z.enum(['User', 'Admin']).optional(),
 });
 
 // Project
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().max(1000).optional(),
-  norm: z.string().default('IEC 62443'),
-  minRoleToView: z.enum(['any', 'viewer', 'editor', 'admin', 'private']).default('any'),
+  norm: z.string().optional(),
+  norms: z.array(z.enum(PROJECT_NORMS)).optional(),
+  invitedUsers: z.array(projectInviteUserSchema).optional(),
+  invitedGroups: z.array(projectInviteGroupSchema).optional(),
+  invitedUserIds: z.array(z.string().min(1)).optional(),
+  invitedGroupIds: z.array(z.string().min(1)).optional(),
+  minRoleToView: z.enum(['any', 'user', 'admin', 'private', 'viewer', 'editor']).optional(),
 });
 
 export const updateProjectSchema = createProjectSchema.partial();

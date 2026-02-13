@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
-import { canUserViewProject } from '@/lib/project-access';
+import { canEditProjectMembershipRole, canUserViewProject } from '@/lib/project-access';
 import { isGlobalAdmin } from '@/lib/user-role';
+import { PROJECT_NORMS, normalizeSelectableProjectNorms, serializeProjectNorms } from '@/lib/project-norm';
 import {
   PROJECT_TRASH_RETENTION_DAYS,
   getProjectTrashExpiry,
@@ -14,7 +15,9 @@ import * as z from 'zod';
 const UpdateProjectSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  minRoleToView: z.enum(['any', 'viewer', 'editor', 'admin', 'private']).optional(),
+  norm: z.string().optional(),
+  norms: z.array(z.enum(PROJECT_NORMS)).optional(),
+  minRoleToView: z.enum(['any', 'user', 'admin', 'private', 'viewer', 'editor']).optional(),
 });
 
 // GET /api/projects/[projectId]
@@ -70,9 +73,14 @@ export async function GET(
     }
 
     const creatorUserId = project.members[0]?.userId ?? null;
+    const canManageSettings =
+      isGlobalAdmin(session.user?.role) ||
+      membership?.role === 'Admin' ||
+      creatorUserId === userId;
     return NextResponse.json({
       ...project,
-      canEdit: isGlobalAdmin(session.user?.role) || membership?.role === 'Admin' || membership?.role === 'Editor',
+      canEdit: isGlobalAdmin(session.user?.role) || canEditProjectMembershipRole(membership?.role),
+      canManageSettings,
       canDelete:
         isGlobalAdmin(session.user?.role) ||
         membership?.role === 'Admin' ||
@@ -116,7 +124,18 @@ export async function PUT(
 
     const activeProject = await prisma.project.findFirst({
       where: activeProjectWhere,
-      select: { id: true },
+      select: {
+        id: true,
+        members: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+          select: {
+            userId: true,
+            role: true,
+          },
+        },
+      },
     });
 
     if (!activeProject) {
@@ -126,27 +145,35 @@ export async function PUT(
       );
     }
 
-    // Check authorization (must be Admin)
-    const membership = await prisma.projectMembership.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-    });
+    const membership = activeProject.members.find((member) => member.userId === userId);
+    const creatorUserId = activeProject.members[0]?.userId ?? null;
+    const canManageSettings =
+      isGlobalAdmin(session.user?.role) ||
+      membership?.role === 'Admin' ||
+      creatorUserId === userId;
 
-    if (!isGlobalAdmin(session.user?.role) && (!membership || membership.role !== 'Admin')) {
+    if (!canManageSettings) {
       return NextResponse.json(
-        { error: 'Not authorized (Admin required)' },
+        { error: 'Not authorized (Project creator, project Admin, or global Admin required)' },
         { status: 403 }
       );
     }
 
     const body = await req.json();
-    const { name, description, minRoleToView } = UpdateProjectSchema.parse(body);
+    const { name, description, norm, norms, minRoleToView } = UpdateProjectSchema.parse(body);
+    const normalizedMinRoleToView = minRoleToView === 'user' ? 'editor' : minRoleToView;
+    const normalizedNorm =
+      norm !== undefined || norms !== undefined
+        ? serializeProjectNorms(normalizeSelectableProjectNorms(norms, norm))
+        : undefined;
 
     const project = await prisma.project.update({
       where: { id: projectId },
       data: {
         ...(name && { name }),
         ...(description !== undefined && { description }),
-        ...(minRoleToView && { minRoleToView }),
+        ...(normalizedNorm !== undefined && { norm: normalizedNorm }),
+        ...(normalizedMinRoleToView && { minRoleToView: normalizedMinRoleToView }),
       },
       include: {
         members: {

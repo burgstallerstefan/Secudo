@@ -4,8 +4,7 @@
 
 export const ROLES = {
   ADMIN: 'Admin',
-  EDITOR: 'Editor',
-  VIEWER: 'Viewer',
+  USER: 'User',
 } as const;
 
 export const COMPONENT_TYPES = {

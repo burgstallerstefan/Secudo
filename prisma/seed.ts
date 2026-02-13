@@ -26,7 +26,7 @@ async function main() {
       password: hashedPassword,
       jobTitle: 'Security Engineer',
       company: 'Test Company',
-      role: 'Viewer',
+      role: 'User',
     },
   });
 

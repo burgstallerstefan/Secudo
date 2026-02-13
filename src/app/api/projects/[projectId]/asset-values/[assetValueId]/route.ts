@@ -79,10 +79,19 @@ export async function PUT(
       return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
     }
 
-    const updated = await prisma.assetValue.update({
+    let updated = await prisma.assetValue.update({
       where: { id: params.assetValueId },
       data,
     });
+
+    if (!updated.createdByUserId) {
+      updated = await prisma.assetValue.update({
+        where: { id: params.assetValueId },
+        data: {
+          createdByUserId: userId,
+        },
+      });
+    }
 
     return NextResponse.json(updated);
   } catch (error) {

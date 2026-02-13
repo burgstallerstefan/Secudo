@@ -2,10 +2,10 @@
  * Role-Based Access Control (RBAC) Utilities
  */
 
-export type ProjectRole = 'Admin' | 'Editor' | 'Viewer';
+export type ProjectRole = 'Admin' | 'User' | 'Editor' | 'Viewer';
 
 export function canEdit(role: ProjectRole | null | undefined): boolean {
-  return role === 'Admin' || role === 'Editor';
+  return role === 'Admin' || role === 'User' || role === 'Editor' || role === 'Viewer';
 }
 
 export function canAdmin(role: ProjectRole | null | undefined): boolean {
@@ -18,8 +18,9 @@ export function canView(role: ProjectRole | null | undefined): boolean {
 
 export function roleHierarchy(): Record<ProjectRole, number> {
   return {
-    Admin: 3,
-    Editor: 2,
+    Admin: 2,
+    User: 1,
+    Editor: 1,
     Viewer: 1,
   };
 }

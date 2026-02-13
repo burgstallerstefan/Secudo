@@ -104,8 +104,8 @@ export async function PUT(
     if (!existing || existing.projectId !== params.projectId) {
       return NextResponse.json({ error: 'Answer not found' }, { status: 404 });
     }
-    if (existing.userId !== userId && membership.role !== 'Admin') {
-      return NextResponse.json({ error: 'Only owner or admin can edit answer' }, { status: 403 });
+    if (existing.userId !== userId) {
+      return NextResponse.json({ error: 'Only the answer owner can edit this answer' }, { status: 403 });
     }
 
     const question = await prisma.question.findUnique({
@@ -222,8 +222,8 @@ export async function DELETE(
     if (!existing || existing.projectId !== params.projectId) {
       return NextResponse.json({ error: 'Answer not found' }, { status: 404 });
     }
-    if (existing.userId !== userId && membership.role !== 'Admin') {
-      return NextResponse.json({ error: 'Only owner or admin can delete answer' }, { status: 403 });
+    if (existing.userId !== userId) {
+      return NextResponse.json({ error: 'Only the answer owner can delete this answer' }, { status: 403 });
     }
 
     await prisma.answer.delete({

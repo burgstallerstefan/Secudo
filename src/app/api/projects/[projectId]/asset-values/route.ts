@@ -144,7 +144,7 @@ export async function POST(
     }
 
     // Create or update asset value
-    const assetValue = await prisma.assetValue.upsert({
+    let assetValue = await prisma.assetValue.upsert({
       where: {
         projectId_assetType_assetId: {
           projectId: params.projectId,
@@ -159,8 +159,20 @@ export async function POST(
         assetId,
         value,
         comment,
+        createdByUserId: userId,
       },
     });
+
+    if (!assetValue.createdByUserId) {
+      assetValue = await prisma.assetValue.update({
+        where: {
+          id: assetValue.id,
+        },
+        data: {
+          createdByUserId: userId,
+        },
+      });
+    }
 
     return NextResponse.json(assetValue, { status: 201 });
   } catch (error) {

@@ -11,7 +11,7 @@ const RegisterSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   jobTitle: z.string().optional(),
-  role: z.enum(['Viewer', 'Editor', 'Admin']).optional(),
+  role: z.enum(['User', 'Admin']).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         email,
         password: hashedPassword,
         jobTitle,
-        role: 'Viewer',
+        role: 'User',
       },
     });
 

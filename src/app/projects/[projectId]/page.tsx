@@ -1,34 +1,60 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import GraphEditor from '@/components/project/GraphEditor';
+import ProjectSettings from '@/components/project/ProjectSettings';
 import AssetValuation from '@/components/project/AssetValuation';
 import AssessmentQuestions from '@/components/project/AssessmentQuestions';
 import FindingsAndMeasures from '@/components/project/FindingsAndMeasures';
 import ReportPreview from '@/components/project/ReportPreview';
+import InviteNotificationsBell from '@/components/common/InviteNotificationsBell';
 
 interface Project {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   norm: string;
+  minRoleToView: string;
   canEdit?: boolean;
+  canManageSettings?: boolean;
 }
 
 export default function ProjectPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams();
   const projectIdParam = params?.projectId;
   const projectId = Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam;
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState('model');
+  const queryTab = searchParams.get('tab');
+  const focusAnswerId = searchParams.get('answerId') || undefined;
+  const focusAssetType = searchParams.get('assetType') || undefined;
+  const focusAssetId = searchParams.get('assetId') || undefined;
+  const focusCommentId = searchParams.get('commentId') || undefined;
+
+  useEffect(() => {
+    if (!queryTab) {
+      return;
+    }
+
+    const allowedTabs = new Set(['settings', 'model', 'assets', 'questions', 'findings', 'report']);
+    if (allowedTabs.has(queryTab)) {
+      setActiveTab(queryTab);
+    }
+  }, [queryTab]);
+
+  const handleProjectUpdated = (updates: Partial<Project>) => {
+    setProject((previous) => (previous ? { ...previous, ...updates } : previous));
+  };
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -96,6 +122,25 @@ export default function ProjectPage() {
             <p className="text-slate-400 text-sm">{project.description || 'No description'}</p>
           </div>
           <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <InviteNotificationsBell />
+              <button
+                type="button"
+                onClick={() => router.push('/settings')}
+                className="rounded-lg border border-slate-600 bg-slate-700/80 p-2 text-slate-300 transition-colors hover:bg-slate-600 hover:text-white"
+                aria-label="Open project settings"
+                title="Settings"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M10.45 3.18a1.75 1.75 0 0 1 3.1 0l.44.9a1.75 1.75 0 0 0 2.1.93l.99-.3a1.75 1.75 0 0 1 2.2 2.2l-.3.99a1.75 1.75 0 0 0 .93 2.1l.9.44a1.75 1.75 0 0 1 0 3.1l-.9.44a1.75 1.75 0 0 0-.93 2.1l.3.99a1.75 1.75 0 0 1-2.2 2.2l-.99-.3a1.75 1.75 0 0 0-2.1.93l-.44.9a1.75 1.75 0 0 1-3.1 0l-.44-.9a1.75 1.75 0 0 0-2.1-.93l-.99.3a1.75 1.75 0 0 1-2.2-2.2l.3-.99a1.75 1.75 0 0 0-.93-2.1l-.9-.44a1.75 1.75 0 0 1 0-3.1l.9-.44a1.75 1.75 0 0 0 .93-2.1l-.3-.99a1.75 1.75 0 0 1 2.2-2.2l.99.3a1.75 1.75 0 0 0 2.1-.93l.44-.9Z"
+                  />
+                  <circle cx="12" cy="12" r="3.2" />
+                </svg>
+              </button>
+            </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-slate-400">Profile</p>
               <p className="text-sm text-slate-200">{session?.user?.name || session?.user?.email}</p>
@@ -103,7 +148,7 @@ export default function ProjectPage() {
             <button
               type="button"
               onClick={() => signOut({ redirect: true, callbackUrl: '/login' })}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-200 transition-colors"
+              className="rounded-lg border border-red-500/50 bg-red-900/20 px-4 py-2 text-red-200 transition-colors hover:bg-red-900/35"
             >
               Sign Out
             </button>
@@ -114,8 +159,11 @@ export default function ProjectPage() {
       {/* Navigation Tabs */}
       <div className="border-b border-slate-700">
         <div className="mx-auto w-full max-w-[1800px] px-3 md:px-4">
-          <Tabs defaultValue="model" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="bg-transparent border-b border-slate-700 rounded-none">
+              <TabsTrigger value="settings" className="text-slate-300 border-b-2 border-transparent data-[state=active]:border-orange-400">
+                Settings
+              </TabsTrigger>
               <TabsTrigger value="model" className="text-slate-300 border-b-2 border-transparent data-[state=active]:border-orange-400">
                 Canonical Model
               </TabsTrigger>
@@ -133,16 +181,41 @@ export default function ProjectPage() {
               </TabsTrigger>
             </TabsList>
 
+            <TabsContent value="settings" className="px-1 pb-4 pt-3 md:px-2">
+              <ProjectSettings
+                projectId={projectId}
+                project={{
+                  name: project.name,
+                  description: project.description,
+                  norm: project.norm,
+                  minRoleToView: project.minRoleToView,
+                }}
+                canManageSettings={project.canManageSettings ?? false}
+                onProjectUpdated={handleProjectUpdated}
+              />
+            </TabsContent>
+
             <TabsContent value="model" className="px-1 pb-4 pt-3 md:px-2">
               <GraphEditor projectId={projectId} canEdit={project.canEdit ?? false} />
             </TabsContent>
 
             <TabsContent value="assets" className="px-1 pb-4 pt-3 md:px-2">
-              <AssetValuation projectId={projectId} canEdit={project.canEdit ?? false} />
+              <AssetValuation
+                projectId={projectId}
+                canEdit={project.canEdit ?? false}
+                focusAssetType={focusAssetType}
+                focusAssetId={focusAssetId}
+                focusCommentId={focusCommentId}
+              />
             </TabsContent>
 
             <TabsContent value="questions" className="px-1 pb-4 pt-3 md:px-2">
-              <AssessmentQuestions projectId={projectId} canEdit={project.canEdit ?? false} />
+              <AssessmentQuestions
+                projectId={projectId}
+                canEdit={project.canEdit ?? false}
+                focusAnswerId={focusAnswerId}
+                focusCommentId={focusCommentId}
+              />
             </TabsContent>
 
             <TabsContent value="findings" className="px-1 pb-4 pt-3 md:px-2">

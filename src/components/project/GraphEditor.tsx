@@ -3245,7 +3245,7 @@ export default function GraphEditor({ projectId, canEdit = false }: GraphEditorP
       {warning && <div className="rounded border border-yellow-600/40 bg-yellow-900/20 p-3 text-sm text-yellow-100">{warning}</div>}
       {!canEdit && (
         <div className="rounded border border-slate-600 bg-slate-800/70 p-3 text-sm text-slate-300">
-          Read-only mode: viewers can inspect the model but cannot edit.
+          Read-only mode: you can inspect the model but cannot edit.
         </div>
       )}
 

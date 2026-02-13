@@ -1,0 +1,6 @@
+[submodule "standards/nist/oscal-content"]
+	path = standards/nist/oscal-content
+	url = https://github.com/usnistgov/oscal-content.git
+[submodule "standards/nist/OSCAL"]
+	path = standards/nist/OSCAL
+	url = https://github.com/usnistgov/OSCAL.git

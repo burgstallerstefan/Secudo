@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth';
 import { getProjectViewAccess } from '@/lib/project-access';
+import { getPrimaryProjectNorm, isNoneOnlyProjectNorm, parseProjectNorms } from '@/lib/project-norm';
 import { isGlobalAdmin } from '@/lib/user-role';
 import { NextRequest, NextResponse } from 'next/server';
 import * as z from 'zod';
@@ -89,8 +90,25 @@ export async function GET(
           include: {
             user: {
               select: {
+                id: true,
                 name: true,
                 email: true,
+              },
+            },
+            comments: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+              include: {
+                author: {
+                  select: {
+                    id: true,
+                    name: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                  },
+                },
               },
             },
           },
@@ -110,15 +128,17 @@ export async function GET(
       );
     }
 
-    if (questions.length === 0 && project.norm !== 'None') {
+    const projectNorms = parseProjectNorms(project.norm);
+    const noneOnlyNorm = isNoneOnlyProjectNorm(project.norm);
+    const primaryProjectNorm = getPrimaryProjectNorm(project.norm);
+    const hasIec62443 = projectNorms.includes('IEC 62443');
+
+    if (questions.length === 0 && !noneOnlyNorm) {
       await prisma.question.createMany({
         data: DEFAULT_QUESTIONS.map((question) => ({
           projectId: params.projectId,
           text: question.text,
-          normReference:
-            project.norm === 'IEC 62443'
-              ? question.normReference
-              : project.norm,
+          normReference: hasIec62443 ? question.normReference : primaryProjectNorm,
           targetType: question.targetType,
           answerType: question.answerType,
         })),
@@ -131,8 +151,25 @@ export async function GET(
             include: {
               user: {
                 select: {
+                  id: true,
                   name: true,
                   email: true,
+                },
+              },
+              comments: {
+                orderBy: {
+                  createdAt: 'asc',
+                },
+                include: {
+                  author: {
+                    select: {
+                      id: true,
+                      name: true,
+                      firstName: true,
+                      lastName: true,
+                      email: true,
+                    },
+                  },
                 },
               },
             },
@@ -194,11 +231,27 @@ export async function POST(
     const body = await req.json();
     const { text, normReference, targetType, answerType, riskDescription } = CreateQuestionSchema.parse(body);
 
+    const projectNorm = membership?.project.norm
+      ? membership.project.norm
+      : (
+          await prisma.project.findUnique({
+            where: { id: params.projectId },
+            select: { norm: true },
+          })
+        )?.norm;
+
+    if (!projectNorm) {
+      return NextResponse.json(
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
+
     const question = await prisma.question.create({
       data: {
         projectId: params.projectId,
         text,
-        normReference: normReference || (membership.project.norm !== 'None' ? membership.project.norm : 'Custom'),
+        normReference: normReference || (isNoneOnlyProjectNorm(projectNorm) ? 'Custom' : getPrimaryProjectNorm(projectNorm)),
         targetType,
         answerType,
         riskDescription,
@@ -208,8 +261,25 @@ export async function POST(
           include: {
             user: {
               select: {
+                id: true,
                 name: true,
                 email: true,
+              },
+            },
+            comments: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+              include: {
+                author: {
+                  select: {
+                    id: true,
+                    name: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                  },
+                },
               },
             },
           },

@@ -1,10 +1,9 @@
-export type GlobalUserRole = 'Admin' | 'Editor' | 'Viewer';
+export type GlobalUserRole = 'Admin' | 'User';
 
 export function normalizeGlobalRole(role: string | null | undefined): GlobalUserRole {
   const value = (role || '').toLowerCase();
   if (value === 'admin') return 'Admin';
-  if (value === 'editor') return 'Editor';
-  return 'Viewer';
+  return 'User';
 }
 
 export function isGlobalAdmin(role: string | null | undefined): boolean {
@@ -12,7 +11,5 @@ export function isGlobalAdmin(role: string | null | undefined): boolean {
 }
 
 export function canManageUserRoles(role: string | null | undefined): boolean {
-  const normalized = normalizeGlobalRole(role);
-  return normalized === 'Admin' || normalized === 'Editor';
+  return normalizeGlobalRole(role) === 'Admin';
 }
-

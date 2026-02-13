@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { useSession } from 'next-auth/react';
 import Button from '@/components/common/Button';
 
 interface Answer {
@@ -10,11 +11,26 @@ interface Answer {
   targetType?: string | null;
   targetId?: string | null;
   user?: {
-    name: string | null;
-    email: string;
+    id?: string;
+    name?: string | null;
+    email?: string | null;
   };
   createdAt: string;
   comment?: string | null;
+  comments?: AnswerComment[];
+}
+
+interface AnswerComment {
+  id: string;
+  text: string;
+  createdAt: string;
+  author?: {
+    id?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+    email?: string | null;
+  };
 }
 
 interface Question {
@@ -29,6 +45,8 @@ interface Question {
 interface AssessmentQuestionsProps {
   projectId: string;
   canEdit?: boolean;
+  focusAnswerId?: string;
+  focusCommentId?: string;
 }
 
 interface ComponentOption {
@@ -123,7 +141,43 @@ const formatAnswerValue = (value: string): string => {
   return `${normalized}/10`;
 };
 
-export default function AssessmentQuestions({ projectId, canEdit = true }: AssessmentQuestionsProps) {
+const formatAnswerAuthor = (answer: Answer): string => {
+  const authorName = answer.user?.name?.trim();
+  const authorEmail = answer.user?.email?.trim();
+
+  if (authorName && authorEmail && authorName.toLowerCase() !== authorEmail.toLowerCase()) {
+    return `${authorName} (${authorEmail})`;
+  }
+
+  return authorName || authorEmail || 'Unknown user';
+};
+
+const formatCommentAuthor = (comment: AnswerComment): string => {
+  const firstName = comment.author?.firstName?.trim() || '';
+  const lastName = comment.author?.lastName?.trim() || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  const fallbackName = comment.author?.name?.trim() || '';
+  const email = comment.author?.email?.trim() || '';
+  return fullName || fallbackName || email || 'Unknown user';
+};
+
+const COMMENT_PREVIEW_LENGTH = 80;
+
+const getCommentPreview = (rawComment: string): string => {
+  const normalized = rawComment.trim();
+  if (normalized.length <= COMMENT_PREVIEW_LENGTH) {
+    return normalized;
+  }
+  return `${normalized.slice(0, COMMENT_PREVIEW_LENGTH).trimEnd()}...`;
+};
+
+export default function AssessmentQuestions({
+  projectId,
+  canEdit = true,
+  focusAnswerId,
+  focusCommentId,
+}: AssessmentQuestionsProps) {
+  const { data: session } = useSession();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
@@ -134,6 +188,12 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
   const [error, setError] = useState('');
   const [showCreateQuestionForm, setShowCreateQuestionForm] = useState(false);
   const [isCreatingQuestion, setIsCreatingQuestion] = useState(false);
+  const [expandedCommentAnswerIds, setExpandedCommentAnswerIds] = useState<Set<string>>(new Set());
+  const [openAnswerCommentEditorIds, setOpenAnswerCommentEditorIds] = useState<Set<string>>(new Set());
+  const [answerCommentDrafts, setAnswerCommentDrafts] = useState<Record<string, string>>({});
+  const [submittingAnswerCommentId, setSubmittingAnswerCommentId] = useState<string | null>(null);
+  const [highlightedAnswerId, setHighlightedAnswerId] = useState<string | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [components, setComponents] = useState<ComponentOption[]>([]);
   const [dataObjects, setDataObjects] = useState<DataObjectOption[]>([]);
   const [newQuestion, setNewQuestion] = useState({
@@ -150,6 +210,9 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
     () => new Map(dataObjects.map((dataObject) => [dataObject.id, dataObject.name])),
     [dataObjects]
   );
+  const currentUserId = session?.user?.id ?? null;
+  const hasAppliedAnswerFocusRef = useRef(false);
+  const hasAppliedCommentFocusRef = useRef(false);
 
   const fetchQuestions = async () => {
     try {
@@ -240,6 +303,45 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
     }
   }, [canEdit, selectedQuestion]);
 
+  useEffect(() => {
+    if (hasAppliedCommentFocusRef.current) {
+      return;
+    }
+    if (!focusCommentId) {
+      return;
+    }
+
+    const element = document.getElementById(`answer-comment-${focusCommentId}`);
+    if (!element) {
+      return;
+    }
+
+    hasAppliedCommentFocusRef.current = true;
+    setHighlightedCommentId(focusCommentId);
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => {
+      setHighlightedCommentId((current) => (current === focusCommentId ? null : current));
+    }, 2400);
+  }, [focusCommentId, questions]);
+
+  useEffect(() => {
+    if (hasAppliedAnswerFocusRef.current || !focusAnswerId) {
+      return;
+    }
+
+    const element = document.getElementById(`answer-entry-${focusAnswerId}`);
+    if (!element) {
+      return;
+    }
+
+    hasAppliedAnswerFocusRef.current = true;
+    setHighlightedAnswerId(focusAnswerId);
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => {
+      setHighlightedAnswerId((current) => (current === focusAnswerId ? null : current));
+    }, 2400);
+  }, [focusAnswerId, questions]);
+
   const handleSubmitAnswer = async () => {
     if (!canEdit || !selectedQuestion) {
       return;
@@ -326,6 +428,46 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
       setError((createError as Error).message);
     } finally {
       setIsCreatingQuestion(false);
+    }
+  };
+
+  const handleSubmitAnswerComment = async (answerId: string) => {
+    const draft = answerCommentDrafts[answerId] || '';
+    const normalizedDraft = draft.trim();
+    if (!normalizedDraft || submittingAnswerCommentId) {
+      return;
+    }
+
+    try {
+      setError('');
+      setSubmittingAnswerCommentId(answerId);
+      const response = await fetch(`/api/projects/${projectId}/answers/${answerId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: normalizedDraft,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || 'Comment could not be saved');
+      }
+
+      setAnswerCommentDrafts((previous) => ({
+        ...previous,
+        [answerId]: '',
+      }));
+      setOpenAnswerCommentEditorIds((previous) => {
+        const next = new Set(previous);
+        next.delete(answerId);
+        return next;
+      });
+      await fetchQuestions();
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      setSubmittingAnswerCommentId(null);
     }
   };
 
@@ -424,7 +566,7 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
         )
       ) : (
         <div className="rounded border border-slate-700 bg-slate-800/40 p-3 text-sm text-slate-300">
-          Read-only mode: Viewer cannot submit answers or create questions.
+          Read-only mode: you cannot submit answers or create questions, but you can comment on existing answers.
         </div>
       )}
 
@@ -478,11 +620,37 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
                   <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
                     {sortedAnswers.map((answer) => {
                       const targetLabel = resolveAnswerTargetLabel(answer);
+                      const normalizedComment = answer.comment?.trim() || '';
+                      const hasComment = normalizedComment.length > 0;
+                      const isOwnAnswer = Boolean(currentUserId && answer.user?.id === currentUserId);
+                      const shouldUseCollapsibleComment = hasComment && !isOwnAnswer;
+                      const isCommentExpanded = expandedCommentAnswerIds.has(answer.id);
+                      const isCommentLong = normalizedComment.length > COMMENT_PREVIEW_LENGTH;
+                      const displayedComment =
+                        shouldUseCollapsibleComment && !isCommentExpanded
+                          ? getCommentPreview(normalizedComment)
+                          : normalizedComment;
+                      const answerComments = [...(answer.comments || [])].sort(
+                        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                      );
+                      const answerCommentDraft = answerCommentDrafts[answer.id] || '';
+                      const isSubmittingComment = submittingAnswerCommentId === answer.id;
+                      const isCommentEditorOpen = openAnswerCommentEditorIds.has(answer.id);
+
                       return (
-                        <div key={answer.id} className="rounded border border-slate-600/60 bg-slate-800/40 p-2 text-xs">
+                        <div
+                          key={answer.id}
+                          id={`answer-entry-${answer.id}`}
+                          className={`rounded border p-2 text-xs transition-colors ${
+                            highlightedAnswerId === answer.id
+                              ? 'border-orange-400 bg-orange-900/20'
+                              : 'border-slate-600/60 bg-slate-800/40'
+                          }`}
+                        >
                           <div className="flex items-center justify-between gap-2">
                             <p className="truncate text-slate-300">
-                              <span className="font-semibold">{answer.user?.name || answer.user?.email || 'Unknown user'}</span>
+                              <span className="font-semibold">Answered by:</span>{' '}
+                              <span>{formatAnswerAuthor(answer)}</span>
                             </p>
                             <span className={`rounded px-2 py-1 font-semibold ${getAnswerBadgeClass(answer.answerValue)}`}>
                               {formatAnswerValue(answer.answerValue)}
@@ -490,7 +658,117 @@ export default function AssessmentQuestions({ projectId, canEdit = true }: Asses
                           </div>
                           <p className="mt-1 text-[11px] text-slate-500">{new Date(answer.createdAt).toLocaleString()}</p>
                           {targetLabel && <p className="mt-1 text-[11px] text-cyan-300">Target: {targetLabel}</p>}
-                          {answer.comment && <p className="mt-1 italic text-slate-400">&quot;{answer.comment}&quot;</p>}
+                          {hasComment ? (
+                            <div className="mt-1">
+                              <p className="italic text-slate-400">&quot;{displayedComment}&quot;</p>
+                              {shouldUseCollapsibleComment && isCommentLong ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setExpandedCommentAnswerIds((previous) => {
+                                      const next = new Set(previous);
+                                      if (next.has(answer.id)) {
+                                        next.delete(answer.id);
+                                      } else {
+                                        next.add(answer.id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="mt-1 text-[11px] font-medium text-cyan-300 transition-colors hover:text-cyan-200"
+                                >
+                                  {isCommentExpanded ? 'Show less' : 'Show more'}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {answerComments.length > 0 ? (
+                            <div className="mt-2 space-y-1 rounded border border-slate-700/70 bg-slate-900/40 p-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                Comments
+                              </p>
+                              {answerComments.map((entry) => (
+                                <div
+                                  key={entry.id}
+                                  id={`answer-comment-${entry.id}`}
+                                  className={`rounded border p-2 transition-colors ${
+                                    highlightedCommentId === entry.id
+                                      ? 'border-orange-400 bg-orange-900/20'
+                                      : 'border-slate-700/80 bg-slate-800/50'
+                                  }`}
+                                >
+                                  <p className="text-[11px] text-slate-300">
+                                    <span className="font-semibold">{formatCommentAuthor(entry)}</span>: {entry.text}
+                                  </p>
+                                  <p className="mt-1 text-[10px] text-slate-500">
+                                    {new Date(entry.createdAt).toLocaleString()}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-2" onClick={(event) => event.stopPropagation()}>
+                            {!isCommentEditorOpen ? (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setOpenAnswerCommentEditorIds((previous) => {
+                                    const next = new Set(previous);
+                                    next.add(answer.id);
+                                    return next;
+                                  });
+                                }}
+                                className="rounded border border-orange-500/40 bg-orange-900/20 px-3 py-1 text-xs font-semibold text-orange-200 transition-colors hover:bg-orange-900/35"
+                              >
+                                Add Comment
+                              </button>
+                            ) : (
+                              <div className="rounded border border-slate-700/70 bg-slate-900/40 p-2">
+                                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                  Add comment
+                                </label>
+                                <textarea
+                                  value={answerCommentDraft}
+                                  onChange={(event) =>
+                                    setAnswerCommentDrafts((previous) => ({
+                                      ...previous,
+                                      [answer.id]: event.target.value,
+                                    }))
+                                  }
+                                  rows={2}
+                                  placeholder="Write a comment..."
+                                  className="w-full rounded border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white placeholder-slate-400 focus:border-orange-400 focus:outline-none"
+                                />
+                                <div className="mt-2 flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOpenAnswerCommentEditorIds((previous) => {
+                                        const next = new Set(previous);
+                                        next.delete(answer.id);
+                                        return next;
+                                      })
+                                    }
+                                    className="rounded border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSubmitAnswerComment(answer.id)}
+                                    disabled={isSubmittingComment || !answerCommentDraft.trim()}
+                                    className="rounded bg-orange-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {isSubmittingComment ? 'Saving...' : 'Comment'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

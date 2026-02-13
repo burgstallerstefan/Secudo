@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { canManageUserRoles } from '@/lib/user-role';
+import { canManageUserRoles, normalizeGlobalRole } from '@/lib/user-role';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -29,7 +29,12 @@ export async function GET(_request: NextRequest) {
       },
     });
 
-    return NextResponse.json(users);
+    return NextResponse.json(
+      users.map((user) => ({
+        ...user,
+        role: normalizeGlobalRole(user.role),
+      }))
+    );
   } catch (error) {
     if ((error as Error).message === 'Unauthenticated') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -39,4 +44,3 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

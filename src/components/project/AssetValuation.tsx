@@ -56,6 +56,21 @@ interface AssetValue {
   comment?: string;
 }
 
+interface AssetValuationComment {
+  id: string;
+  assetType: 'Node' | 'Edge' | 'DataObject';
+  assetId: string;
+  text: string;
+  createdAt: string;
+  author?: {
+    id?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+    email?: string | null;
+  };
+}
+
 type AssetBucket = 'Component' | 'Interface' | 'Data';
 type RateType = 'Node' | 'Edge' | 'DataObject';
 
@@ -140,6 +155,15 @@ function riskLevel(value: number | null): { label: string; color: string } {
   return { label: 'Low', color: 'text-green-400' };
 }
 
+const formatCommentAuthor = (commentAuthor: AssetValuationComment['author']): string => {
+  const firstName = commentAuthor?.firstName?.trim() || '';
+  const lastName = commentAuthor?.lastName?.trim() || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  const fallbackName = commentAuthor?.name?.trim() || '';
+  const email = commentAuthor?.email?.trim() || '';
+  return fullName || fallbackName || email || 'Unknown user';
+};
+
 function formatEdgeFlowLabel(
   edge: EdgeAsset,
   direction: EdgeDataFlowRecord['direction'],
@@ -171,9 +195,15 @@ function valueKey(assetType: RateType, assetId: string) {
 export default function AssetValuation({
   projectId,
   canEdit = false,
+  focusAssetType,
+  focusAssetId,
+  focusCommentId,
 }: {
   projectId: string;
   canEdit?: boolean;
+  focusAssetType?: string;
+  focusAssetId?: string;
+  focusCommentId?: string;
 }) {
   const [nodes, setNodes] = useState<NodeAsset[]>([]);
   const [edges, setEdges] = useState<EdgeAsset[]>([]);
@@ -181,19 +211,27 @@ export default function AssetValuation({
   const [componentData, setComponentData] = useState<ComponentDataRecord[]>([]);
   const [edgeDataFlows, setEdgeDataFlows] = useState<EdgeDataFlowRecord[]>([]);
   const [values, setValues] = useState<Map<string, AssetValue>>(new Map());
+  const [assetComments, setAssetComments] = useState<AssetValuationComment[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [commentError, setCommentError] = useState('');
   const [selectedAssetKey, setSelectedAssetKey] = useState<string | null>(null);
   const [value, setValue] = useState(5);
   const [comment, setComment] = useState('');
+  const [newAssetComment, setNewAssetComment] = useState('');
+  const [isAssetCommentComposerOpen, setIsAssetCommentComposerOpen] = useState(false);
+  const [isSubmittingAssetComment, setIsSubmittingAssetComment] = useState(false);
+  const [highlightedAssetCommentId, setHighlightedAssetCommentId] = useState<string | null>(null);
   const [dataConfidentiality, setDataConfidentiality] = useState(5);
   const [dataIntegrity, setDataIntegrity] = useState(5);
   const [dataAvailability, setDataAvailability] = useState(5);
   const [isSavingDataCia, setIsSavingDataCia] = useState(false);
   const [dataCiaSaveStatus, setDataCiaSaveStatus] = useState('');
   const dataCiaSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasAppliedAssetFocusRef = useRef(false);
+  const hasAppliedCommentFocusRef = useRef(false);
 
   useEffect(() => {
     void fetchData();
@@ -204,7 +242,7 @@ export default function AssetValuation({
       setIsLoading(true);
       setLoadError('');
 
-      const [nodesRes, edgesRes, dataObjectsRes, valuesRes, componentDataRes, edgeDataFlowsRes] =
+      const [nodesRes, edgesRes, dataObjectsRes, valuesRes, componentDataRes, edgeDataFlowsRes, assetCommentsRes] =
         await Promise.all([
           fetch(`/api/projects/${projectId}/nodes`),
           fetch(`/api/projects/${projectId}/edges`),
@@ -212,6 +250,7 @@ export default function AssetValuation({
           fetch(`/api/projects/${projectId}/asset-values`),
           fetch(`/api/projects/${projectId}/component-data`),
           fetch(`/api/projects/${projectId}/edge-data-flows`),
+          fetch(`/api/projects/${projectId}/asset-comments`),
         ]);
 
       if (!nodesRes.ok || !edgesRes.ok || !dataObjectsRes.ok || !valuesRes.ok) {
@@ -228,6 +267,9 @@ export default function AssetValuation({
       const nextEdgeDataFlows = edgeDataFlowsRes.ok
         ? ((await edgeDataFlowsRes.json()) as EdgeDataFlowRecord[])
         : [];
+      const nextAssetComments = assetCommentsRes.ok
+        ? ((await assetCommentsRes.json()) as AssetValuationComment[])
+        : [];
 
       setNodes(nextNodes);
       setEdges(nextEdges);
@@ -235,6 +277,7 @@ export default function AssetValuation({
       setComponentData(nextComponentData);
       setEdgeDataFlows(nextEdgeDataFlows);
       setValues(new Map(nextValues.map((entry) => [valueKey(entry.assetType, entry.assetId), entry])));
+      setAssetComments(nextAssetComments);
     } catch (fetchError) {
       setLoadError((fetchError as Error).message || 'Loading assets failed');
     } finally {
@@ -601,6 +644,83 @@ export default function AssetValuation({
     return dataObjects.find((item) => item.id === selectedAsset.rateId) || null;
   }, [dataObjects, selectedAsset]);
 
+  const selectedAssetComments = useMemo(() => {
+    if (!selectedAsset) {
+      return [];
+    }
+
+    return assetComments
+      .filter(
+        (entry) =>
+          entry.assetType === selectedAsset.rateType &&
+          entry.assetId === selectedAsset.rateId
+      )
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }, [assetComments, selectedAsset]);
+
+  useEffect(() => {
+    if (hasAppliedAssetFocusRef.current) {
+      return;
+    }
+    if (!focusAssetType || !focusAssetId || groupedAssets.length === 0) {
+      return;
+    }
+
+    const normalizedFocusType = focusAssetType.trim();
+    if (normalizedFocusType !== 'Node' && normalizedFocusType !== 'Edge' && normalizedFocusType !== 'DataObject') {
+      hasAppliedAssetFocusRef.current = true;
+      return;
+    }
+
+    const targetAsset = groupedAssets
+      .flatMap((group) => [...group.components, ...group.interfaces, ...group.data])
+      .find((asset) => asset.rateType === normalizedFocusType && asset.rateId === focusAssetId);
+
+    if (!targetAsset) {
+      hasAppliedAssetFocusRef.current = true;
+      return;
+    }
+
+    const nextSelectedAssetKey = `${targetAsset.rateType}_${targetAsset.rateId}_${targetAsset.key}`;
+    const existing = values.get(valueKey(targetAsset.rateType, targetAsset.rateId));
+    const isDataAsset = targetAsset.rateType === 'DataObject';
+    const dataObjectForAsset = isDataAsset
+      ? dataObjects.find((item) => item.id === targetAsset.rateId) || null
+      : null;
+
+    setSelectedAssetKey(nextSelectedAssetKey);
+    setValue(
+      dataObjectForAsset
+        ? dataObjectCriticality(dataObjectForAsset)
+        : existing?.value || targetAsset.defaultValue || 5
+    );
+    setComment(isDataAsset ? '' : existing?.comment || '');
+    setNewAssetComment('');
+    setIsAssetCommentComposerOpen(false);
+    hasAppliedAssetFocusRef.current = true;
+  }, [dataObjects, focusAssetId, focusAssetType, groupedAssets, values]);
+
+  useEffect(() => {
+    if (hasAppliedCommentFocusRef.current) {
+      return;
+    }
+    if (!focusCommentId || !selectedAssetKey || selectedAssetComments.length === 0) {
+      return;
+    }
+
+    const targetElement = document.getElementById(`asset-comment-${focusCommentId}`);
+    if (!targetElement) {
+      return;
+    }
+
+    hasAppliedCommentFocusRef.current = true;
+    setHighlightedAssetCommentId(focusCommentId);
+    targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => {
+      setHighlightedAssetCommentId((current) => (current === focusCommentId ? null : current));
+    }, 2400);
+  }, [focusCommentId, selectedAssetComments, selectedAssetKey]);
+
   const ratedCount = useMemo(() => {
     let count = 0;
     Array.from(values.keys()).forEach((key) => {
@@ -613,6 +733,7 @@ export default function AssetValuation({
 
   const handleSelectAsset = (asset: ViewAsset) => {
     setSaveError('');
+    setCommentError('');
     const key = valueKey(asset.rateType, asset.rateId);
     const existing = values.get(key);
     const isDataAsset = asset.rateType === 'DataObject';
@@ -622,6 +743,7 @@ export default function AssetValuation({
     const nextSelectedAssetKey = `${asset.rateType}_${asset.rateId}_${asset.key}`;
     if (selectedAssetKey === nextSelectedAssetKey) {
       setSelectedAssetKey(null);
+      setIsAssetCommentComposerOpen(false);
       return;
     }
     setSelectedAssetKey(nextSelectedAssetKey);
@@ -631,6 +753,8 @@ export default function AssetValuation({
         : existing?.value || asset.defaultValue || 5
     );
     setComment(isDataAsset ? '' : existing?.comment || '');
+    setNewAssetComment('');
+    setIsAssetCommentComposerOpen(false);
   };
 
   useEffect(() => {
@@ -771,6 +895,45 @@ export default function AssetValuation({
     }
   };
 
+  const handleSubmitAssetComment = async () => {
+    if (!selectedAsset || isSubmittingAssetComment) {
+      return;
+    }
+
+    const normalizedComment = newAssetComment.trim();
+    if (!normalizedComment) {
+      return;
+    }
+
+    try {
+      setCommentError('');
+      setIsSubmittingAssetComment(true);
+      const response = await fetch(`/api/projects/${projectId}/asset-comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetType: selectedAsset.rateType,
+          assetId: selectedAsset.rateId,
+          text: normalizedComment,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || 'Failed to save comment');
+      }
+
+      const savedComment = (await response.json()) as AssetValuationComment;
+      setAssetComments((previous) => [savedComment, ...previous]);
+      setNewAssetComment('');
+      setIsAssetCommentComposerOpen(false);
+    } catch (submitError) {
+      setCommentError((submitError as Error).message);
+    } finally {
+      setIsSubmittingAssetComment(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-slate-400">Loading assets...</div>;
   }
@@ -811,7 +974,7 @@ export default function AssetValuation({
 
       {!canEdit && (
         <div className="rounded-lg border border-slate-600 bg-slate-800/70 p-3 text-sm text-slate-300">
-          Read-only mode: viewers can inspect asset ratings but cannot modify them.
+          Read-only mode: you can inspect ratings and add comments, but cannot change values.
         </div>
       )}
 
@@ -1000,6 +1163,83 @@ export default function AssetValuation({
                                     </>
                                   )}
 
+                                  {commentError ? (
+                                    <div className="rounded border border-red-700/40 bg-red-900/20 p-2 text-xs text-red-200">
+                                      {commentError}
+                                    </div>
+                                  ) : null}
+
+                                  <div className="space-y-2 rounded-lg border border-slate-600/70 bg-slate-900/35 p-3">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                                      Discussion
+                                    </p>
+                                    {selectedAssetComments.length === 0 ? (
+                                      <p className="text-xs text-slate-500">No comments yet.</p>
+                                    ) : (
+                                      <div className="max-h-32 space-y-2 overflow-y-auto pr-1">
+                                        {selectedAssetComments.map((entry) => (
+                                          <div
+                                            key={entry.id}
+                                            id={`asset-comment-${entry.id}`}
+                                            className={`rounded border p-2 transition-colors ${
+                                              highlightedAssetCommentId === entry.id
+                                                ? 'border-orange-400 bg-orange-900/20'
+                                                : 'border-slate-700/80 bg-slate-800/55'
+                                            }`}
+                                          >
+                                            <p className="text-[11px] text-slate-300">
+                                              <span className="font-semibold">{formatCommentAuthor(entry.author)}</span>
+                                              : {entry.text}
+                                            </p>
+                                            <p className="mt-1 text-[10px] text-slate-500">
+                                              {new Date(entry.createdAt).toLocaleString()}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {!isAssetCommentComposerOpen ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setIsAssetCommentComposerOpen(true)}
+                                        className="rounded border border-orange-500/40 bg-orange-900/20 px-3 py-1 text-xs font-semibold text-orange-200 transition-colors hover:bg-orange-900/35"
+                                      >
+                                        Add Comment
+                                      </button>
+                                    ) : (
+                                      <>
+                                        <textarea
+                                          value={newAssetComment}
+                                          onChange={(event) => setNewAssetComment(event.target.value)}
+                                          rows={2}
+                                          placeholder="Write a comment..."
+                                          className="w-full rounded border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white placeholder-slate-400 focus:border-orange-400 focus:outline-none"
+                                        />
+                                        <div className="flex justify-end gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setIsAssetCommentComposerOpen(false);
+                                              setNewAssetComment('');
+                                            }}
+                                            className="rounded border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
+                                          >
+                                            Cancel
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => void handleSubmitAssetComment()}
+                                            disabled={isSubmittingAssetComment || !newAssetComment.trim()}
+                                            className="rounded bg-orange-600 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                          >
+                                            {isSubmittingAssetComment ? 'Saving...' : 'Comment'}
+                                          </button>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+
                                   <div className="flex gap-2">
                                     {canEdit && !isSelectedDataObject ? (
                                       <Button onClick={handleSaveValue} className="flex-1">
@@ -1011,6 +1251,7 @@ export default function AssetValuation({
                                       onClick={() => {
                                         setSelectedAssetKey(null);
                                         setSaveError('');
+                                        setCommentError('');
                                       }}
                                       className={`${canEdit && !isSelectedDataObject ? 'flex-1' : 'w-full'} rounded-lg bg-slate-700 px-4 py-2 text-white transition-colors hover:bg-slate-600`}
                                     >

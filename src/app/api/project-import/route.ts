@@ -41,20 +41,22 @@ function readBoolean(value: unknown): boolean {
   return value === true;
 }
 
-function normalizeProjectMinRoleToView(value: unknown): 'any' | 'viewer' | 'editor' | 'admin' | 'private' {
+function normalizeProjectMinRoleToView(value: unknown): 'any' | 'user' | 'admin' | 'private' {
   const normalized = readString(value)?.toLowerCase();
   if (normalized === 'any') return 'any';
-  if (normalized === 'viewer') return 'viewer';
-  if (normalized === 'editor') return 'editor';
+  if (normalized === 'user') return 'user';
+  if (normalized === 'viewer') return 'user';
+  if (normalized === 'editor') return 'user';
   if (normalized === 'admin') return 'admin';
   return 'private';
 }
 
-function normalizeMembershipRole(value: unknown): 'Admin' | 'Editor' | 'Viewer' {
+function normalizeMembershipRole(value: unknown): 'Admin' | 'Editor' {
   const normalized = readString(value)?.toLowerCase();
   if (normalized === 'admin') return 'Admin';
-  if (normalized === 'editor') return 'Editor';
-  return 'Viewer';
+  if (normalized === 'user') return 'Editor';
+  if (normalized === 'viewer') return 'Editor';
+  return 'Editor';
 }
 
 function normalizeEdgeDirection(value: unknown): 'A_TO_B' | 'B_TO_A' | 'BIDIRECTIONAL' {

@@ -5,7 +5,7 @@ import { canManageUserRoles } from '@/lib/user-role';
 import * as z from 'zod';
 
 const UpdateUserRoleSchema = z.object({
-  role: z.enum(['Viewer', 'Editor', 'Admin']),
+  role: z.enum(['User', 'Admin']),
 });
 
 export async function PATCH(
